@@ -17,7 +17,7 @@ def init_connection():
 try:
     supabase: Client = init_connection()
 except Exception as e:
-    st.error("数据库连接失败，请检查 Streamlit Secrets 配置。")
+    st.error(f"数据库连接失败！具体错误原因：{e}")
     st.stop()
 
 # --- 数据库操作函数 ---
