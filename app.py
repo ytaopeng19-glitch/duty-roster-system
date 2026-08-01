@@ -10,10 +10,13 @@ st.set_page_config(page_title="中佳研发部周末值班报名系统", page_ic
 # 这里使用变量名读取，真实的网址和密钥放在 .streamlit/secrets.toml 中
 @st.cache_resource
 def init_connection():
-    url = st.secrets["https://srzfkhiminxmbrbdipay.supabase.co/rest/v1/"]
-    key = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyemZraGltaW54bWJyYmRpcGF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2OTgyOTcsImV4cCI6MjA4ODI3NDI5N30.jI9aum5Qe5eniH-oHBiRyIo41EpKUIDedkH-2vHiPnw"]
+  @st.cache_resource
+def init_connection():
+    # 注意看下面两行，方括号里是 SUPABASE_URL 和 SUPABASE_KEY
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
-
+   
 try:
     supabase: Client = init_connection()
 except Exception as e:
