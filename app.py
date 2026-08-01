@@ -7,16 +7,12 @@ from supabase import create_client, Client
 st.set_page_config(page_title="中佳研发部周末值班报名系统", page_icon="📝", layout="centered")
 
 # --- 初始化 Supabase 客户端 ---
-# 这里使用变量名读取，真实的网址和密钥放在 .streamlit/secrets.toml 中
 @st.cache_resource
 def init_connection():
-  @st.cache_resource
-def init_connection():
-    # 注意看下面两行，方括号里是 SUPABASE_URL 和 SUPABASE_KEY
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
-   
+
 try:
     supabase: Client = init_connection()
 except Exception as e:
