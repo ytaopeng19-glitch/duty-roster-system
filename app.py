@@ -1,52 +1,51 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import datetime
+from supabase import create_client, Client
 
-# 1. 数据库初始化函数
-def init_db():
-    conn = sqlite3.connect('duty_roster.db')
-    c = conn.cursor()
-    # 创建报名表，包含：id、姓名、意向日期、提交时间
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS registrations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            target_date TEXT NOT NULL,
-            submit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# --- 页面设置 (必须放在最前面) ---
+st.set_page_config(page_title="中佳研发部周末值班报名系统", page_icon="📝", layout="centered")
 
-# 2. 数据库操作函数
+# --- 初始化 Supabase 客户端 ---
+# 这里的 url 和 key 会从 Streamlit 的安全配置中读取，防止泄露
+@st.cache_resource
+def init_connection():
+    url = st.secrets["https://srzfkhiminxmbrbdipay.supabase.co/rest/v1/"]
+    key = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyemZraGltaW54bWJyYmRpcGF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2OTgyOTcsImV4cCI6MjA4ODI3NDI5N30.jI9aum5Qe5eniH-oHBiRyIo41EpKUIDedkH-2vHiPnw"]
+    return create_client(url, key)
+
+try:
+    supabase: Client = init_connection()
+except Exception as e:
+    st.error("数据库连接失败，请检查 Streamlit Secrets 配置。")
+    st.stop()
+
+# --- 数据库操作函数 ---
 def add_registration(name, target_date):
-    conn = sqlite3.connect('duty_roster.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO registrations (name, target_date) VALUES (?, ?)", 
-              (name, str(target_date)))
-    conn.commit()
-    conn.close()
+    # 插入数据到 supabase
+    data = {"name": name, "target_date": str(target_date)}
+    supabase.table("registrations").insert(data).execute()
 
 def get_registration_count():
-    conn = sqlite3.connect('duty_roster.db')
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM registrations")
-    count = c.fetchone()[0]
-    conn.close()
-    return count
+    # 查询当前总人数
+    response = supabase.table("registrations").select("*", count="exact").execute()
+    return response.count
 
 def get_all_registrations():
-    conn = sqlite3.connect('duty_roster.db')
-    df = pd.read_sql_query("SELECT id as 序号, name as 姓名, target_date as 意向日期, submit_time as 提交时间 FROM registrations", conn)
-    conn.close()
+    # 获取所有报名数据
+    response = supabase.table("registrations").select("*").execute()
+    df = pd.DataFrame(response.data)
+    if not df.empty:
+        # 重命名列以便于展示
+        df = df.rename(columns={
+            "id": "序号", 
+            "name": "姓名", 
+            "target_date": "意向日期", 
+            "submit_time": "提交时间"
+        })
+        # 转换时间格式，去掉 Supabase 默认的时区尾巴，看起来更干净
+        df['提交时间'] = pd.to_datetime(df['提交时间']).dt.strftime('%Y-%m-%d %H:%M:%S')
     return df
-
-# 初始化数据库
-init_db()
-
-# --- 页面设置 ---
-st.set_page_config(page_title="中佳研发部周末值班报名系统", page_icon="📝", layout="centered")
 
 # --- 主界面（前端：所有人可见） ---
 st.title("📝 中佳研发部周末值班报名系统")
@@ -74,16 +73,14 @@ with st.form("registration_form", clear_on_submit=True):
         else:
             add_registration(user_name, target_date)
             st.success(f"🎉 感谢报名，{user_name}！您的值班申请已提交成功。")
-            # 刷新页面以更新报名人数
             st.rerun()
-
 
 # --- 侧边栏（后台：仅管理员可见） ---
 st.sidebar.title("🔒 后台管理")
 st.sidebar.write("仅限管理员查看具体报名名单")
 
-# 设置管理员密码（你可以自行修改这里的 "zj123456"）
-ADMIN_PASSWORD = "zj123456" 
+# 从 Secrets 读取后台密码，更安全
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "zj123456")
 
 admin_pwd = st.sidebar.text_input("请输入管理员密码", type="password")
 
@@ -99,7 +96,7 @@ if admin_pwd:
         if not df.empty:
             st.dataframe(df, use_container_width=True)
             
-            # 提供下载为 Excel/CSV 的功能
+            # 提供下载为 CSV 的功能
             csv = df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 导出名单为 CSV",
