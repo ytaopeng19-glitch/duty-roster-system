@@ -1,152 +1,207 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta, date
 from supabase import create_client, Client
+from datetime import date, timedelta
 
-# --- 页面设置 (必须放在最前面) ---
-st.set_page_config(page_title="中佳研发部周末值班报名系统", page_icon="📝", layout="centered")
+# --- 1. 页面基本配置 ---
+st.set_page_config(page_title="中佳研发周末值班登记系统", page_icon="🏢", layout="centered")
 
-# --- 初始化 Supabase 客户端 ---
+# --- 2. 数据库连接 ---
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
     return create_client(url, key)
 
-try:
-    supabase: Client = init_connection()
-except Exception as e:
-    st.error(f"数据库连接失败！具体错误原因：{e}")
-    st.stop()
+supabase: Client = init_connection()
 
-# --- 日期计算函数：获取 2026 年剩余的所有周末 ---
-def get_remaining_weekends_2026():
-    today = datetime.now().date()
-    # 设定截止日期为2026年底
-    end_of_year = date(2026, 12, 31)
+# --- 3. 获取全局数据 (用于前台看板和后台管理) ---
+@st.cache_data(ttl=5) # 缓存5秒，避免频繁刷新导致数据库压力过大
+def fetch_all_data():
+    response = supabase.table("registrations").select("*").order("duty_date", desc=True).execute()
+    return response.data
+
+records = fetch_all_data()
+# 将数据转为 DataFrame，方便后续统计和展示
+df_records = pd.DataFrame(records) if records else pd.DataFrame(columns=["id", "name", "duty_date", "created_at"])
+
+# --- 4. 日期逻辑：仅限2026年剩余的周末 (从8月2日起) ---
+start_date = max(date.today(), date(2026, 8, 2))
+end_date = date(2026, 12, 31)
+
+future_weekends = []
+current_date = start_date
+while current_date <= end_date:
+    if current_date.isoweekday() in [6, 7]: # 6是周六，7是周日
+        future_weekends.append(current_date)
+    current_date += timedelta(days=1)
+
+# 统计每个日期的报名人数
+date_counts = {}
+if not df_records.empty:
+    counts = df_records['duty_date'].value_counts().to_dict()
+    for d_str, count in counts.items():
+        date_counts[d_str] = count
+
+# --- 5. 首页公告栏 ---
+st.title("🏢 中嘉研发周末值班登记")
+
+st.info("""
+### 📢 研发值班制度升级通知
+为进一步优化团队工作模式，提升工作灵活性，**原周末轮值制度现已全面升级为“自愿报名制度”**。
+
+* 🌟 **绩效激励**：**值班记录将作为年末综合绩效评价、评优评先心参考指标**。
+* 🕰️ **值班时间**：早上 `9:00 - 12:00`，下午 `2:00 - 4:00`。
+* 👥 **名额说明**：每天值班**人数不限**，鼓励大家根据项目实际需求积极参与。
+* 📝 **灵活登记**：支持临时决定来加班的同事进行**补充登记**。
+""", icon="💡")
+
+# --- 6. 核心功能区 (双标签页设计) ---
+tab1, tab2 = st.tabs(["📝 我要登记", "🛡️ 管理员后台"])
+
+# ---------------- 标签页 1：用户前台登记 ----------------
+with tab1:
+    st.subheader("📊 2026周末值班报名看板")
+    st.caption("在此查看各周末报名热度 (保护隐私，仅显示人数)")
     
-    # 确保起始日期是今天（如果当前已经超过2026年，这里会自动处理为空）
-    current = today if today.year == 2026 else date(2026, 1, 1)
-    
-    weekends = []
-    while current <= end_of_year:
-        # weekday() 返回 5 是周六，6 是周日
-        if current.weekday() in [5, 6]:
-            weekends.append(current)
-        current += timedelta(days=1)
-    return weekends
-
-# --- 数据库操作函数 ---
-def add_registration(name, target_date):
-    # 插入数据到 supabase
-    data = {"name": name, "target_date": str(target_date)}
-    supabase.table("registrations").insert(data).execute()
-
-def get_registration_count():
-    # 查询当前总人数
-    response = supabase.table("registrations").select("*", count="exact").execute()
-    return response.count
-
-def get_all_registrations():
-    # 获取所有报名数据
-    response = supabase.table("registrations").select("*").execute()
-    df = pd.DataFrame(response.data)
-    if not df.empty:
-        # 重命名列以便于展示
-        df = df.rename(columns={
-            "id": "序号", 
-            "name": "姓名", 
-            "target_date": "意向日期", 
-            "submit_time": "提交时间"
-        })
-        # 转换时间格式，去掉 Supabase 默认的时区尾巴，看起来更干净
-        df['提交时间'] = pd.to_datetime(df['提交时间']).dt.strftime('%Y-%m-%d %H:%M:%S')
-    return df
-
-# --- 主界面（前端：所有人可见） ---
-st.title("📝 中佳研发部周末值班报名系统")
-
-# 获取并显示当前报名人数
-current_count = get_registration_count()
-if current_count > 0:
-    st.info(f"📣 提示：当前已有 **{current_count}** 人成功报名值班。")
-else:
-    st.info("📣 提示：当前暂无人员报名，快来抢占第一个名额吧！")
-
-st.write("---")
-
-# 获取 2026 剩余周末数据
-remaining_weekends = get_remaining_weekends_2026()
-weekday_cn = {5: "周六", 6: "周日"}
-# 格式化日期列表，例如 "2026-08-02 (周日)"
-weekend_options = [f"{d.strftime('%Y-%m-%d')} ({weekday_cn[d.weekday()]})" for d in remaining_weekends]
-
-# 增加一个折叠面板，展示 2026 年剩余的所有周末
-with st.expander("📅 点击查看 2026 年剩余的所有周末一览表", expanded=False):
-    if not weekend_options:
-        st.write("2026年已无剩余周末。")
-    else:
-        # 将日期分成 3 列展示，更加美观紧凑
-        cols = st.columns(3)
-        for i, opt in enumerate(weekend_options):
-            cols[i % 3].write(f"• {opt}")
-
-# 报名表单
-st.subheader("提交报名")
-with st.form("registration_form", clear_on_submit=True):
-    user_name = st.text_input("请输入您的姓名（必填）", max_chars=20)
-    
-    # 核心改动：用下拉菜单代替日历输入框，彻底锁定只能选周末
-    if weekend_options:
-        target_date_str = st.selectbox("请选择意向值班日期（仅限 2026 年周末）", weekend_options)
-    else:
-        st.warning("⚠️ 2026 年已无有效周末可选。")
-        target_date_str = None
-    
-    submitted = st.form_submit_button("🚀 确认报名")
-    
-    if submitted:
-        if not user_name.strip():
-            st.error("姓名不能为空，请重新输入！")
-        elif not target_date_str:
-            st.error("当前无有效日期可报名！")
+    # 构建前台看板数据
+    dashboard_data = []
+    for w in future_weekends:
+        w_str = str(w)
+        count = date_counts.get(w_str, 0)
+        weekday_str = "周六" if w.isoweekday() == 6 else "周日"
+        
+        if count == 0:
+            status = "🟢 虚位以待"
+        elif count == 1:
+            status = "🟡 已有 1 人"
         else:
-            # 通过 split 提取纯日期部分存入数据库，例如提取 "2026-08-02"
-            pure_date = target_date_str.split(" ")[0]
-            add_registration(user_name, pure_date)
-            st.success(f"🎉 感谢报名，{user_name}！您的值班申请（{pure_date}）已提交成功。")
-            st.rerun()
-
-# --- 侧边栏（后台：仅管理员可见） ---
-st.sidebar.title("🔒 后台管理")
-st.sidebar.write("仅限管理员查看具体报名名单")
-
-# 从 Secrets 读取后台密码，更安全
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "zj123456")
-
-admin_pwd = st.sidebar.text_input("请输入管理员密码", type="password")
-
-if admin_pwd:
-    if admin_pwd == ADMIN_PASSWORD:
-        st.sidebar.success("✅ 登录成功")
-        
-        st.markdown("---")
-        st.subheader("📊 后台数据：已报名名单")
-        
-        # 获取所有数据并展示
-        df = get_all_registrations()
-        if not df.empty:
-            st.dataframe(df, use_container_width=True)
+            status = f"🔥 已有 {count} 人"
             
-            # 提供下载为 CSV 的功能
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📥 导出名单为 CSV",
-                data=csv,
-                file_name=f"周末值班报名名单_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.write("目前还没有人报名。")
+        dashboard_data.append({
+            "📅 日期": f"{w_str} ({weekday_str})",
+            "👥 已报名人数": count,
+            "💡 当前状态": status
+        })
+    
+    # 展示前台看板
+    if dashboard_data:
+        st.dataframe(pd.DataFrame(dashboard_data), use_container_width=True, hide_index=True)
     else:
-        st.sidebar.error("❌ 密码错误，请重试")
+        st.warning("2026年已无剩余周末。")
+
+    st.divider()
+    
+    st.subheader("新增值班登记")
+    
+    # 日期选择放在表单外部，以实现实时预警
+    weekend_options = [f"{str(w)} ({'周六' if w.isoweekday() == 6 else '周日'})" for w in future_weekends]
+    
+    if weekend_options:
+        selected_date_str = st.selectbox("📅 选择值班日期 (仅限2026年剩余周末)", options=weekend_options)
+        selected_actual_date = selected_date_str.split(" ")[0] # 提取出纯日期字符串，如 '2026-08-02'
+        
+        # --- 动态容量预警 ---
+        current_count = date_counts.get(selected_actual_date, 0)
+        if current_count >= 2:
+            st.warning(f"⚠️ **{selected_actual_date} 已有两位（或以上）同事值班！** \n\n您是否继续选择今天，还是考虑选择其他日期？")
+        elif current_count == 1:
+            st.info(f"ℹ️ {selected_actual_date} 已有 1 位同事报名，继续报名即可。")
+        else:
+            st.success(f"✅ {selected_actual_date} 目前尚无人报名，期待您的加入！")
+            
+        # --- 提交表单 ---
+        with st.form("registration_form"):
+            user_name = st.text_input("您的姓名", placeholder="请输入您的真实姓名")
+            submit_button = st.form_submit_button("🚀 提交登记")
+            
+            if submit_button:
+                if user_name.strip() == "":
+                    st.warning("⚠️ 姓名不能为空，请重新输入！")
+                else:
+                    try:
+                        # 插入数据
+                        data = {"name": user_name, "duty_date": selected_actual_date}
+                        supabase.table("registrations").insert(data).execute()
+                        st.success(f"✅ {user_name}，您在 {selected_actual_date} 的值班登记已成功提交！辛苦了！")
+                        # 清除缓存并刷新页面以更新看板
+                        fetch_all_data.clear()
+                        st.rerun() 
+                    except Exception as e:
+                        st.error(f"❌ 提交失败，请联系管理员。报错信息：{e}")
+    else:
+        st.error("当前不在可选的排班日期范围内。")
+
+
+# ---------------- 标签页 2：管理员后台 (增删查 + 导出) ----------------
+with tab2:
+    st.subheader("后台数据管理")
+    admin_password = st.text_input("请输入管理员密码", type="password")
+    
+    if admin_password == st.secrets["admin"]["password"]:
+        st.success("✅ 身份验证通过")
+        st.divider()
+        
+        if not df_records.empty:
+            # 美化列名展示
+            display_df = df_records.rename(columns={
+                "id": "记录ID", 
+                "name": "值班人", 
+                "duty_date": "值班日期", 
+                "created_at": "系统提交时间"
+            })
+            
+            col_title, col_download = st.columns([2, 1])
+            with col_title:
+                st.write("📊 **当前所有实名登记记录：**")
+            with col_download:
+                # --- 新增功能：导出为 CSV (支持 Excel 打开) ---
+                csv = display_df.to_csv(index=False).encode('utf-8-sig') # 使用 utf-8-sig 防止 Excel 乱码
+                st.download_button(
+                    label="📥 导出值班表格",
+                    data=csv,
+                    file_name=f"周末值班明细_{date.today()}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            col1, col2 = st.columns(2)
+            
+            # --- 功能 A：管理员直接增加记录 ---
+            with col1:
+                st.write("➕ **后台代登记**")
+                with st.form("admin_add_form"):
+                    add_name = st.text_input("姓名")
+                    # 后台不受日期限制，方便补录历史
+                    add_date = st.date_input("值班日期", value=date.today())
+                    if st.form_submit_button("确认添加"):
+                        if add_name.strip():
+                            supabase.table("registrations").insert({"name": add_name, "duty_date": str(add_date)}).execute()
+                            st.success("✅ 后台代登记成功！")
+                            fetch_all_data.clear()
+                            st.rerun() 
+                        else:
+                            st.warning("⚠️ 请输入姓名")
+            
+            # --- 功能 B：管理员删除错误记录 ---
+            with col2:
+                st.write("🗑️ **删除无效记录**")
+                with st.form("admin_delete_form"):
+                    delete_options = {f"ID:{row['id']} | {row['name']} ({row['duty_date']})": row['id'] for index, row in df_records.iterrows()}
+                    selected_str = st.selectbox("请选择要删除的记录", options=list(delete_options.keys()))
+                    
+                    if st.form_submit_button("确认删除"):
+                        delete_id = delete_options[selected_str]
+                        supabase.table("registrations").delete().eq("id", delete_id).execute()
+                        st.success(f"✅ 记录已成功删除！")
+                        fetch_all_data.clear()
+                        st.rerun() 
+                        
+        else:
+            st.info("📂 当前数据库中没有任何值班记录。")
+            
+    elif admin_password != "":
+        st.error("❌ 密码错误，您没有访问权限。")
