@@ -7,7 +7,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="中佳研发部周末值班报名系统", page_icon="📝", layout="centered")
 
 # --- 初始化 Supabase 客户端 ---
-# 这里的 url 和 key 会从 Streamlit 的安全配置中读取，防止泄露
+# 这里使用变量名读取，真实的网址和密钥放在 .streamlit/secrets.toml 中
 @st.cache_resource
 def init_connection():
     url = st.secrets["https://srzfkhiminxmbrbdipay.supabase.co/rest/v1/"]
