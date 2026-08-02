@@ -47,8 +47,13 @@ if st.session_state.user is None:
     st.subheader("🔐 员工身份认证")
     
     with st.container(border=True):
-        login_emp_id = st.selectbox("请选择您的员工编号", options=[""] + list(EMPLOYEES.keys()))
-        if login_emp_id:
+        # 优化下拉菜单：将编号与姓名拼接展示
+        display_options = [""] + [f"{k} - {v}" for k, v in EMPLOYEES.items()]
+        selected_option = st.selectbox("请选择您的员工账号", options=display_options)
+        
+        if selected_option:
+            # 从 "26001 - 郑家颖" 中提取实际的编号 "26001"
+            login_emp_id = selected_option.split(" - ")[0]
             emp_name = EMPLOYEES[login_emp_id]
             st.info(f"👤 匹配姓名：**{emp_name}**")
             
