@@ -174,13 +174,23 @@ with tab1:
         st.success(f"✅ 该日期已有 {current_selected_count} 人报名，欢迎加入团队作战！", icon="🤝")
         
     if st.button("🚀 确认以我的名义提交登记"):
-        try:
-            data = {"name": my_name, "target_date": selected_date_val}
-            supabase.table("registrations").insert(data).execute()
-            st.success(f"✅ {my_name}，您在 {selected_date_val} 的值班登记已成功提交！辛苦了！")
-            st.rerun() 
-        except Exception as e:
-            st.error(f"❌ 提交失败，报错信息：{e}")
+        # 新增：检查该员工是否在当天已经提交过登记
+        is_duplicate = False
+        if not df_records.empty:
+            match = df_records[(df_records['name'] == my_name) & (df_records['target_date'] == selected_date_val)]
+            if not match.empty:
+                is_duplicate = True
+                
+        if is_duplicate:
+            st.error(f"❌ 提交失败：您已经报名了 {selected_date_val} 的值班，请勿重复提交！")
+        else:
+            try:
+                data = {"name": my_name, "target_date": selected_date_val}
+                supabase.table("registrations").insert(data).execute()
+                st.success(f"✅ {my_name}，您在 {selected_date_val} 的值班登记已成功提交！辛苦了！")
+                st.rerun() 
+            except Exception as e:
+                st.error(f"❌ 提交失败，报错信息：{e}")
 
 # ---------------- 标签页 2：个人工作日志管理 ----------------
 with tab2:
