@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 import uuid
 
 # --- 1. 页面基本配置 ---
@@ -15,6 +15,18 @@ EMPLOYEES = {
     "12002": "刘佳",   "12001": "曲寿康", "24000": "彭宇涛"
 }
 ADMIN_NAMES = ["刘佳", "曲寿康", "彭宇涛"]
+
+# 设置北京时间时区用于时间解析转换
+tz_utc_8 = timezone(timedelta(hours=8))
+
+def get_local_date(time_str):
+    """辅助函数：将 Supabase 数据库返回的时间戳字符串转换为本地（东八区）日期"""
+    try:
+        ts = time_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts)
+        return dt.astimezone(tz_utc_8).date()
+    except Exception:
+        return None
 
 # --- 3. 数据库连接与全局数据获取 ---
 @st.cache_resource
@@ -48,11 +60,8 @@ if st.session_state.user is None:
                     st.error("❌ 密码格式错误：必须是 6 位纯数字！")
                 else:
                     try:
-                        # 检查数据库中是否已有该员工的密码记录
                         res = supabase.table("users").select("*").eq("emp_id", login_emp_id).execute()
-                        
                         if res.data:
-                            # 老用户登录验证
                             if res.data[0]["password"] == login_pwd:
                                 st.session_state.user = {
                                     "emp_id": login_emp_id, 
@@ -63,7 +72,6 @@ if st.session_state.user is None:
                             else:
                                 st.error("❌ 密码错误，请重新输入！")
                         else:
-                            # 新用户首次设密
                             supabase.table("users").insert({
                                 "emp_id": login_emp_id, 
                                 "name": emp_name, 
@@ -78,16 +86,14 @@ if st.session_state.user is None:
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ 数据库连接异常：{e}")
-    st.stop() # 登录成功前停止向下执行
+    st.stop() 
 
 # ================= 下方为登录成功后的主界面 =================
 
-# 快捷获取当前登录用户信息
 current_user = st.session_state.user
 is_admin = current_user["is_admin"]
 my_name = current_user["name"]
 
-# 退出登录按钮 (放在页面右上角)
 col_title, col_logout = st.columns([4, 1])
 with col_title:
     st.title("🏢 中佳研发协同管理系统")
@@ -99,7 +105,7 @@ with col_logout:
 
 st.success(f"👋 欢迎回来，**{my_name}**！您的权限级别：{'管理员 🛡️' if is_admin else '普通员工 👤'}")
 
-# 全局获取值班数据
+# 获取排班数据
 try:
     response = supabase.table("registrations").select("*").order("target_date", desc=True).execute()
     records = response.data
@@ -110,7 +116,6 @@ except Exception as e:
 df_records = pd.DataFrame(records) if records else pd.DataFrame(columns=["id", "name", "target_date", "submit_time"])
 counts_dict = df_records['target_date'].value_counts().to_dict() if not df_records.empty else {}
 
-# 生成允许选择的周末日期
 start_date = date(2026, 8, 2)
 end_date = date(2026, 12, 31)
 valid_weekend_dates = []
@@ -125,7 +130,6 @@ date_options = {
     for d in valid_weekend_dates
 }
 
-# 动态生成标签页 (管理员有 3 个，普通员工只有 2 个)
 if is_admin:
     tab1, tab2, tab3 = st.tabs(["📝 周末值班登记", "📁 个人工作日志", "🛡️ 管理员后台"])
 else:
@@ -176,6 +180,7 @@ with tab1:
 # ---------------- 标签页 2：个人工作日志管理 ----------------
 with tab2:
     st.subheader("📁 个人工作日志中心")
+    st.markdown("💡 **规定说明：** 您仅能查看和下载过去 **1 个星期内** 提交的日志。若当天上传的文件有误，您可以使用右侧的“撤回”按钮删除重传。")
     
     # 文件上传区域
     uploaded_doc = st.file_uploader(
@@ -213,15 +218,17 @@ with tab2:
                     st.error(f"❌ 上传失败，错误信息：{e}")
                     
     st.divider()
-    st.subheader("📜 您的历史日志列表")
+    st.subheader("📜 您近期的日志列表")
     
     try:
-        my_logs_res = supabase.table("work_logs").select("*").eq("name", my_name).order("submit_time", desc=True).execute()
+        # 获取 7 天前的日期字符串，过滤 Supabase 数据
+        seven_days_ago = str(date.today() - timedelta(days=7))
+        my_logs_res = supabase.table("work_logs").select("*").eq("name", my_name).gte("submit_time", seven_days_ago).order("submit_time", desc=True).execute()
         my_logs = my_logs_res.data
         
         if my_logs:
             for log in my_logs:
-                col_info, col_dl = st.columns([3, 1])
+                col_info, col_dl, col_del = st.columns([3, 1, 1])
                 with col_info:
                     st.text(f"📄 文件名: {log['file_name']}\n⏱️ 上传时间: {log['submit_time'].replace('T', ' ').split('.')[0]}")
                 with col_dl:
@@ -230,9 +237,20 @@ with tab2:
                         st.markdown(f"[📥 点击下载]({dl_url})", unsafe_allow_html=True)
                     except:
                         st.write("链接生成失败")
+                with col_del:
+                    # 如果这篇日志是“今天”上传的，则允许员工删除撤回
+                    if get_local_date(log['submit_time']) == date.today():
+                        if st.button("🗑️ 撤回", key=f"del_user_{log['id']}"):
+                            try:
+                                supabase.storage.from_("work_logs").remove([log['file_path']])
+                                supabase.table("work_logs").delete().eq("id", log["id"]).execute()
+                                st.success("✅ 日志已成功撤回。")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 删除失败：{e}")
                 st.markdown("---")
         else:
-            st.info("📂 您当前还没有上传过任何工作日志。")
+            st.info("📂 您在过去 1 个星期内没有上传过任何工作日志。")
     except Exception as e:
         st.warning("⚠️ 暂无日志数据或表结构尚未创建。")
 
@@ -240,11 +258,10 @@ with tab2:
 if is_admin:
     with tab3:
         st.subheader("🛡️ 系统管理后台")
-        st.caption("作为管理员，您拥有查看全局数据和干预操作的权限。")
+        st.caption("作为管理员，您拥有查看全局数据和强制干预删除的权限。")
         
         admin_sub_tab1, admin_sub_tab2 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅"])
         
-        # 子后台 1：值班管理
         with admin_sub_tab1:
             if not df_records.empty:
                 display_df = df_records.rename(columns={
@@ -277,18 +294,15 @@ if is_admin:
             else:
                 st.info("📂 当前无任何排班记录。")
                 
-        # 子后台 2：全体日志调阅库 (升级版)
         with admin_sub_tab2:
             st.write("📊 **公司全体人员日志云端库：**")
             
-            # 增加筛选功能：可看所有人，也可只看指定员工
             all_emp_names = list(EMPLOYEES.values())
             filter_emp = st.selectbox("请选择要调阅的员工日志", options=["查看所有人"] + all_emp_names)
             
             st.divider()
             
             try:
-                # 根据筛选条件构建查询语句
                 if filter_emp == "查看所有人":
                     all_logs_res = supabase.table("work_logs").select("*").order("submit_time", desc=True).execute()
                 else:
@@ -298,17 +312,25 @@ if is_admin:
                 
                 if all_logs:
                     for log in all_logs:
-                        col_info, col_dl = st.columns([3, 1])
+                        col_info, col_dl, col_del = st.columns([3, 1, 1])
                         with col_info:
-                            # 相比个人日志，这里额外显示了“👤 提交人”信息
                             st.text(f"👤 提交人: {log['name']} | 📄 文件名: {log['file_name']}\n⏱️ 上传时间: {log['submit_time'].replace('T', ' ').split('.')[0]}")
                         with col_dl:
                             try:
-                                # 生成直达下载链接
                                 dl_url = supabase.storage.from_("work_logs").get_public_url(log['file_path'])
                                 st.markdown(f"[📥 点击下载]({dl_url})", unsafe_allow_html=True)
                             except:
                                 st.write("获取链接失败")
+                        with col_del:
+                            # 管理员拥有所有日志的强制删除权限
+                            if st.button("危 强制删除", key=f"del_admin_{log['id']}"):
+                                try:
+                                    supabase.storage.from_("work_logs").remove([log['file_path']])
+                                    supabase.table("work_logs").delete().eq("id", log["id"]).execute()
+                                    st.success("✅ 该员工日志已从系统彻底清除。")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ 删除失败：{e}")
                         st.markdown("---")
                 else:
                     st.info("📂 暂无符合条件的工作日志上传记录。")
