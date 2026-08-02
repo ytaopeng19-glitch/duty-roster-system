@@ -244,6 +244,7 @@ if is_admin:
         
         admin_sub_tab1, admin_sub_tab2 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅"])
         
+        # 子后台 1：值班管理
         with admin_sub_tab1:
             if not df_records.empty:
                 display_df = df_records.rename(columns={
@@ -276,41 +277,40 @@ if is_admin:
             else:
                 st.info("📂 当前无任何排班记录。")
                 
+        # 子后台 2：全体日志调阅库 (升级版)
         with admin_sub_tab2:
-            st.write("📊 **公司全体日志云端库：**")
+            st.write("📊 **公司全体人员日志云端库：**")
+            
+            # 增加筛选功能：可看所有人，也可只看指定员工
+            all_emp_names = list(EMPLOYEES.values())
+            filter_emp = st.selectbox("请选择要调阅的员工日志", options=["查看所有人"] + all_emp_names)
+            
+            st.divider()
+            
             try:
-                all_logs_res = supabase.table("work_logs").select("*").order("submit_time", desc=True).execute()
+                # 根据筛选条件构建查询语句
+                if filter_emp == "查看所有人":
+                    all_logs_res = supabase.table("work_logs").select("*").order("submit_time", desc=True).execute()
+                else:
+                    all_logs_res = supabase.table("work_logs").select("*").eq("name", filter_emp).order("submit_time", desc=True).execute()
+                
                 all_logs = all_logs_res.data
                 
                 if all_logs:
-                    # 在后台为管理员生成每个文件的直达下载链接
                     for log in all_logs:
-                        try:
-                            dl_url = supabase.storage.from_("work_logs").get_public_url(log['file_path'])
-                            log['直链下载'] = dl_url
-                        except:
-                            log['直链下载'] = "获取失败"
-                            
-                    df_all_logs = pd.DataFrame(all_logs)
-                    display_logs_df = df_all_logs.rename(columns={
-                        "name": "员工姓名",
-                        "file_name": "原文件名",
-                        "submit_time": "上传时间"
-                    })[["员工姓名", "原文件名", "上传时间", "直链下载"]] 
-                    
-                    # 使用 Streamlit 强大的 Link Column 渲染下载链接
-                    st.dataframe(
-                        display_logs_df, 
-                        use_container_width=True, 
-                        hide_index=True,
-                        column_config={
-                            "直链下载": st.column_config.LinkColumn(
-                                "📂 文件下载",
-                                display_text="📥 点击获取原件"
-                            )
-                        }
-                    )
+                        col_info, col_dl = st.columns([3, 1])
+                        with col_info:
+                            # 相比个人日志，这里额外显示了“👤 提交人”信息
+                            st.text(f"👤 提交人: {log['name']} | 📄 文件名: {log['file_name']}\n⏱️ 上传时间: {log['submit_time'].replace('T', ' ').split('.')[0]}")
+                        with col_dl:
+                            try:
+                                # 生成直达下载链接
+                                dl_url = supabase.storage.from_("work_logs").get_public_url(log['file_path'])
+                                st.markdown(f"[📥 点击下载]({dl_url})", unsafe_allow_html=True)
+                            except:
+                                st.write("获取链接失败")
+                        st.markdown("---")
                 else:
-                    st.info("📂 暂无员工上传工作日志。")
+                    st.info("📂 暂无符合条件的工作日志上传记录。")
             except Exception as e:
-                st.warning(f"⚠️ 无法读取工作日志：{e}")
+                st.warning(f"⚠️ 无法读取工作日志数据：{e}")
