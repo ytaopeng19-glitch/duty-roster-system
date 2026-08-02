@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 from datetime import date, timedelta
+import uuid
 
 # --- 1. 页面基本配置 ---
 st.set_page_config(page_title="中佳研发办公与值班管理系统", page_icon="🏢", layout="centered")
@@ -128,20 +129,19 @@ with tab2:
             else:
                 if st.button("🚀 确认上传该日志文件"):
                     try:
-                        # 构造安全且唯一的云端存储路径
+                        # 构造安全且唯一的云端存储路径 (使用 UUID 替代中文路径以防止 InvalidKey 报错)
                         file_extension = uploaded_doc.name.split('.')[-1]
-                        safe_file_name = f"{date.today()}_{uploaded_doc.name}"
-                        storage_path = f"{my_name.strip()}/{safe_file_name}"
+                        safe_storage_name = f"{uuid.uuid4().hex}_{date.today()}.{file_extension}"
+                        storage_path = f"logs/{safe_storage_name}"
                         
                         # 上传文件到 Supabase Storage 的 work_logs 桶
                         file_bytes = uploaded_doc.getvalue()
                         supabase.storage.from_("work_logs").upload(
                             path=storage_path,
-                            file=file_bytes,
-                            file_options={"upsert": "true"}
+                            file=file_bytes
                         )
                         
-                        # 获取公开下载链接
+                        # 获取公开下载链接 (仅当 Bucket 设为 Public 时有效)
                         public_url_res = supabase.storage.from_("work_logs").get_public_url(storage_path)
                         
                         # 将元数据写入 work_logs 数据库表
