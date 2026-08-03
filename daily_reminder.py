@@ -128,7 +128,7 @@ if missing_users:
         regular_uids = get_valid_uids(regular_missing_names)
         
         if regular_uids:
-            personal_content = f"## 📢 仪器与细胞房日志未交提醒\n\n**针对日期：** {target_date}\n\n{greeting}\n\n⚠️ **系统检测到您尚未提交本日的工作日志。**\n\n为了保障实验室日常记录的完整，请抓紧时间前往系统填写哦！☕️"
+            personal_content = f"## 📢 日志未交提醒\n\n**针对日期：** {target_date}\n\n{greeting}\n\n⚠️ **系统检测到您尚未提交本日的工作日志。**\n\n为了保障实验室日常记录的完整，请抓紧时间前往系统填写哦！☕️"
             
             try:
                 res = requests.post("https://wxpusher.zjiecode.com/api/send/message", json={
@@ -165,7 +165,7 @@ else:
     if WXPUSHER_APP_TOKEN:
         admin_uids = get_valid_uids(["彭宇涛"])
         if admin_uids:
-            success_content = f"## 🎉 仪器与细胞房日志提交完毕\n\n**针对日期：** {target_date}\n\n太棒了！所有同事均已完成本日的工作日志提交，各项管理记录完备。无需进行未交提醒。"
+            success_content = f"## 🎉 日志提交完毕\n\n**针对日期：** {target_date}\n\n太棒了！所有同事均已完成本日的工作日志提交，各项管理记录完备。无需进行未交提醒。"
             try:
                 requests.post("https://wxpusher.zjiecode.com/api/send/message", json={
                     "appToken": WXPUSHER_APP_TOKEN,
