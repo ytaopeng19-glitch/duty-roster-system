@@ -1,32 +1,37 @@
-name: 晚间日志催收自动化
+name: Daily Work Log Reminder
 
 on:
   schedule:
-    # 每天北京时间 21:00, 22:00, 23:00 和 24:00 (次日00:00) 各执行一次
-    - cron: '10 13,14,15,16 * * *'
-  # 保留手动触发按钮，方便您随时测试
-  workflow_dispatch:
+    # 每天北京时间 21:05, 22:05, 23:05 和次日 00:05 各执行一次（错峰 5 分钟避免拥堵）
+    - cron: '40 13,14,15,16 * * *'
+  # 允许在 Actions 页面手动点击 Run workflow 触发
+  workflow_dispatch: 
 
 jobs:
   run-reminder:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 拉取代码 (Checkout code)
-        uses: actions/checkout@v4
+    # 1. 获取仓库代码
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: 配置 Python 环境 (Set up Python)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
+    # 2. 设置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: 安装 Python 依赖包 (Install dependencies)
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytz requests supabase
+    # 3. 安装脚本需要的依赖包
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pytz supabase
 
-      - name: 运行企业微信提醒脚本
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python daily_reminder.py
+    # 4. 运行提醒脚本并注入 Secrets 环境变量
+    - name: Run daily reminder script
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
+      run: python daily_reminder.py
