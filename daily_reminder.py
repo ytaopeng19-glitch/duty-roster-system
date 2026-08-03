@@ -20,7 +20,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 团队全员名单 (13人)
 EMPLOYEES = [
-    "彭玉桃", "刘佳", "曲寿康", "卢镇", "杨贵平", "郑家颖", 
+     "卢镇", "杨贵平", "郑家颖", 
     "刘伟华", "刘玥", "汪孝亮", "谢凌锋", "肖商华", "施明鸿", "李春维"
 ]
 
