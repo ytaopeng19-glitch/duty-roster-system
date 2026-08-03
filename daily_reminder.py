@@ -101,7 +101,7 @@ if missing_users:
     # ----------------------------------------
     # 渠道一：发送到 2 个企业微信群 (公布全名单)
     # ----------------------------------------
-    wecom_content = f"## 📢 仪器与细胞房日志未交提醒\n\n**针对日期：** {target_date}\n\n{greeting}\n\n截至目前，还有以下 **{len(missing_users)}** 位同事尚未提交：\n\n<font color=\"warning\">**{missing_names_str}**</font>\n\n请大家抓紧时间提交！☕️"
+    wecom_content = f"## 📢 日志未交提醒\n\n**针对日期：** {target_date}\n\n{greeting}\n\n截至目前，还有以下 **{len(missing_users)}** 位同事尚未提交：\n\n<font color=\"warning\">**{missing_names_str}**</font>\n\n请大家抓紧时间提交！☕️"
     wecom_msg = {
         "msgtype": "markdown",
         "markdown": {"content": wecom_content}
