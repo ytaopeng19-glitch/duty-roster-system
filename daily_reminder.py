@@ -1,14 +1,20 @@
 import os
 import requests
+import json
 from supabase import create_client
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
-# 1. 配置 Supabase 连接 (替换为您真实的 URL 和 KEY)
-SUPABASE_URL = "您的_SUPABASE_URL"
-SUPABASE_KEY = "您的_SUPABASE_KEY"
+# ==========================================
+# 1. 数据库与机器人基础配置
+# ==========================================
+# ⚠️ 请确保在运行环境中设置了这两个环境变量，或者直接在这里替换成您的真实 URL 和 KEY
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "请替换为您真实的_SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "请替换为您真实的_SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 2. 从系统中同步员工名单
+WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=239105cc-5427-444d-9c32-8ae624ed26fd"
+
+# 系统全体员工名单[cite: 1]
 EMPLOYEES = {
     "26001": "郑家颖", "26002": "刘伟华", "24001": "谢凌锋",
     "24002": "肖商华", "24003": "刘玥",   "25001": "汪孝亮",
@@ -18,49 +24,72 @@ EMPLOYEES = {
 }
 all_names = list(EMPLOYEES.values())
 
+# ==========================================
+# 2. 核心检测逻辑
+# ==========================================
 def check_and_remind():
-    # 获取东八区今天的日期
+    print("开始检测今日工作日志提交情况...")
+    
+    # 获取北京时间（东八区）的今天日期
     tz_utc_8 = timezone(timedelta(hours=8))
     today_str = str(datetime.now(tz_utc_8).date())
     
-    # 3. 从数据库查询今天已提交日志的人员
     try:
+        # 从 Supabase 查询今天提交过日志的记录[cite: 1]
         response = supabase.table("work_logs").select("name").gte("submit_time", today_str).execute()
-        submitted_names = [record['name'] for record in response.data]
+        
+        # 提取已提交人的姓名（去重）
+        submitted_names = list(set([record['name'] for record in response.data]))
+        print(f"今日已提交人员: {submitted_names}")
+        
     except Exception as e:
-        print(f"数据库查询失败: {e}")
+        print(f"❌ 数据库查询失败，请检查连接: {e}")
         return
 
-    # 4. 对比找出未提交的人员
+    # 对比找出未提交的人员
     missing_names = [name for name in all_names if name not in submitted_names]
     
-    # 5. 如果有人没交，则触发群机器人发送消息
     if missing_names:
-        missing_str = "、".join(missing_names)
-        message = f"📢 晚间温馨提示：\n截至目前，以下同事尚未提交今日的工作日志：\n**{missing_str}**\n请大家抓紧时间登录系统提交哦！"
-        send_group_message(message)
+        print(f"检测到 {len(missing_names)} 人未提交，准备发送企业微信提醒...")
+        send_wecom_message(missing_names)
     else:
-        print("所有人均已提交，无需提醒。")
+        print("🎉 太棒了，所有人均已提交今日日志，无需发送提醒。")
 
-def send_group_message(text):
-    # ==========================================
-    # 这里以【企业微信群机器人】为例
-    # 您需要在企业微信群设置里添加一个机器人，并获取它的 Webhook 地址
-    # ==========================================
-    webhook_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=您的机器人KEY"
+# ==========================================
+# 3. 企业微信消息发送逻辑
+# ==========================================
+def send_wecom_message(missing_names):
+    missing_str = "、".join(missing_names)
     
+    # 构造 Markdown 格式的消息体
+    content = f"""<font color="warning">📢 晚间工作日志提交提醒</font>
+    
+截至目前，以下同事尚未提交今日的工作日志：
+<font color="info">**{missing_str}**</font>
+    
+请大家抓紧时间登录系统提交，辛苦啦！💪
+> 系统传送门：[点击这里登录研发协同管理系统](您的系统公网网址请填在这里)"""
+
     payload = {
         "msgtype": "markdown",
         "markdown": {
-            "content": text
+            "content": content
         }
     }
     
+    headers = {'Content-Type': 'application/json'}
+    
     try:
-        requests.post(webhook_url, json=payload)
-        print("提醒消息发送成功！")
+        response = requests.post(WEBHOOK_URL, headers=headers, data=json.dumps(payload))
+        result = response.json()
+        
+        if result.get('errcode') == 0:
+            print("✅ 企业微信提醒发送成功！群里应该已经收到了。")
+        else:
+            print(f"❌ 发送失败，企业微信返回错误：{result}")
+            
     except Exception as e:
-        print(f"消息发送失败: {e}")
+        print(f"❌ 网络请求异常: {e}")
 
 if __name__ == "__main__":
     check_and_remind()
