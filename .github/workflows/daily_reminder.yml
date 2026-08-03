@@ -2,22 +2,20 @@ name: 晚间日志催收自动化
 
 on:
   schedule:
-    # 设定为每天北京时间 21:00 执行
-    # GitHub 服务器使用 UTC 时间，北京时间比 UTC 快 8 小时 (21 - 8 = 13)
     - cron: '0 13 * * *'
-  workflow_dispatch: # 💡 保留这个选项，允许您在网页上手动点击测试
+  workflow_dispatch:
 
 jobs:
   run-reminder:
     runs-on: ubuntu-latest
     steps:
       - name: 获取代码仓库
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # 👈 升级到 v4 解决警告
 
       - name: 设置 Python 环境
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # 👈 升级到 v5 解决警告
         with:
-          python-version: '3.9' # 可以根据您的实际情况修改版本
+          python-version: '3.9'
 
       - name: 安装依赖包
         run: |
@@ -26,7 +24,6 @@ jobs:
 
       - name: 运行企业微信提醒脚本
         env:
-          # 从刚才设置的 GitHub Secrets 中读取密钥
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python daily_reminder.py
