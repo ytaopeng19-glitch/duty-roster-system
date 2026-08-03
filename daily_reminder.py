@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 # 1. 数据库与机器人基础配置
 # ==========================================
 # ⚠️ 请确保在运行环境中设置了这两个环境变量，或者直接在这里替换成您的真实 URL 和 KEY
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "请替换为您真实的_SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "请替换为您真实的_SUPABASE_KEY")
+SUPABASE_URL = os.environ.get("https://srzfkhiminxmbrbdipay.supabase.co", "请替换为您真实的_SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyemZraGltaW54bWJyYmRpcGF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2OTgyOTcsImV4cCI6MjA4ODI3NDI5N30.jI9aum5Qe5eniH-oHBiRyIo41EpKUIDedkH-2vHiPnw", "请替换为您真实的_SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=239105cc-5427-444d-9c32-8ae624ed26fd"
