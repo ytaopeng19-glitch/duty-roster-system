@@ -70,7 +70,7 @@ def main():
     target_date = (datetime.now(TIMEZONE) - timedelta(days=1)).strftime("%Y-%m-%d")
     
     # [调试专用] 如果想测试特定日期，请取消下一行注释并修改日期
-    # target_date = "2026-08-03" 
+    # target_date = "2026-08-04" 
     
     print(f"开始执行 {target_date} 的日志分析任务...")
 
@@ -78,45 +78,56 @@ def main():
     file_count = 0
 
     # =======================================================
-    # 📂 下载并解析 Supabase 日志文件
+    # 📂 通过数据库查询，下载并解析带有真实身份的日志
     # =======================================================
     try:
-        files = supabase.storage.from_(STORAGE_BUCKET_NAME).list("logs")
-        
-        for file in files:
-            file_name = file.get('name', '')
-            
-            if not file_name or file_name.startswith('.'):
-                continue
+        # 为了防止时区误差，提取前三天的所有数据库记录，再在 Python 层面做精准过滤
+        three_days_ago = (datetime.now(TIMEZONE) - timedelta(days=3)).strftime("%Y-%m-%d")
+        response = supabase.table("work_logs").select("*").gte("submit_time", three_days_ago).execute()
+        logs_data = response.data
+
+        if not logs_data:
+            print("近三天内数据库中无任何日志记录。")
+        else:
+            for log in logs_data:
+                submit_time_str = log.get('submit_time')
                 
-            created_at_str = file.get('created_at') 
-            is_target_date = False
-            
-            if created_at_str:
+                if not submit_time_str:
+                    continue
+
                 try:
-                    utc_dt = datetime.strptime(created_at_str[:19], "%Y-%m-%dT%H:%M:%S")
+                    # 将 Supabase 返回的 UTC 时间转换为北京时间日期
+                    utc_dt = datetime.strptime(submit_time_str[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
                     utc_dt = pytz.utc.localize(utc_dt)
                     cn_dt = utc_dt.astimezone(TIMEZONE)
                     file_date = cn_dt.strftime("%Y-%m-%d")
                     
+                    # 匹配目标日期
                     if file_date == target_date:
-                        is_target_date = True
+                        real_file_name = log.get('file_name', '未知文件名')
+                        submitter_name = log.get('name', '未知提交人')
+                        storage_path = log.get('file_path')
+                        
+                        print(f"成功匹配到日志: {submitter_name} - {real_file_name}")
+                        
+                        # 下载实际的文件
+                        file_bytes = supabase.storage.from_(STORAGE_BUCKET_NAME).download(storage_path)
+                        text = extract_text_from_docx(file_bytes)
+                        
+                        if text:
+                            # 给日志打上真实身份和文件名的标签
+                            all_logs_text += f"\n\n========================================\n"
+                            all_logs_text += f"【日志提交人】: {submitter_name}\n"
+                            all_logs_text += f"【原始文件名】: {real_file_name}\n"
+                            all_logs_text += f"【具体工作内容】:\n{text}\n"
+                            all_logs_text += f"========================================\n"
+                            file_count += 1
+                            
                 except Exception as e:
-                    print(f"时间解析失败 {file_name}: {e}")
+                    print(f"处理日志条目时失败 ({log.get('file_name')}): {e}")
 
-            if is_target_date:
-                file_path = f"logs/{file_name}"
-                print(f"成功匹配到文件: {file_path}")
-                
-                response = supabase.storage.from_(STORAGE_BUCKET_NAME).download(file_path)
-                
-                text = extract_text_from_docx(response)
-                if text:
-                    all_logs_text += f"\n\n--- 【日志 ID: {file_name[:8]}...】 ---\n{text}"
-                    file_count += 1
-                    
     except Exception as e:
-        error_msg = f"访问 Supabase 存储桶失败或发生异常: {e}"
+        error_msg = f"访问 Supabase 数据库/存储桶失败或发生异常: {e}"
         print(error_msg)
         send_wxpusher_message(f"## ❌ 日志分析系统异常\n\n{error_msg}", "日志分析系统报错", [ADMIN_UID])
         return
@@ -124,19 +135,17 @@ def main():
     if file_count == 0 or not all_logs_text.strip():
         print(f"{target_date} 暂无有效日志提取。")
         send_wxpusher_message(
-            f"## 📭 实验室日志简报 ({target_date})\n\n系统未能在 `{STORAGE_BUCKET_NAME}` 存储桶的 `logs` 文件夹中检测到 {target_date} 的任何有效 Word 日志，请核实团队成员提交情况。",
+            f"## 📭 实验室日志简报 ({target_date})\n\n系统未能在数据库中检测到 {target_date} 的任何有效 Word 日志，请核实团队成员提交情况。",
             f"无日志提交 ({target_date})",
             [ADMIN_UID]
         )
         return
 
     # =======================================================
-    # 🧠 生成 AI 分析 Prompt
+    # 🧠 生成 AI 分析 Prompt (穿透监督版)
     # =======================================================
-    prompt =f"""
-你是一个专业的科研团队效能分析与数据审查专家。以下是（
-{target_date}）团队成员提交的 {file_count}
- 份工作日志汇总。
+    prompt = f"""
+你是一个专业的科研团队效能分析与数据审查专家。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
 请帮助我深度剖析日志内容，并严格按照以下维度生成一份直击痛点的 Markdown 简报。
 
 【重点审查领域】：
@@ -148,9 +157,7 @@ def main():
 彻底剔除任何关于教学任务、行政事务等不相关的内容。无需汇报常规的细胞培养或环境巡检流水账，将所有算力集中在“项目实质性进展”、“异常排查”和“效能监督”上。
 
 需生成的简报结构：
-## 📊 实验室科研效能与项目简报 (
-{target_date}
-)
+## 📊 实验室科研效能与项目简报 ({target_date})
 
 ### 🔬 项目试验进展归纳
 (请将当天的日志内容按不同的“项目名称”或“研究领域”进行分类，提炼每个领域的核心实质性进展。结构要求极度清晰，必须采用列表形式，不要写废话)
