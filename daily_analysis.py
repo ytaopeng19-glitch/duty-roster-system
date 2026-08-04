@@ -172,7 +172,7 @@ def main():
     # =======================================================
     # 🤖 动态获取当前账号可用的模型列表
     # =======================================================
-    models_to_try = []
+    models_to_try = ['gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest']
     try:
         print("正在查询当前 API Key 可用的模型库...")
         available_models = client.models.list()
