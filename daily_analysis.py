@@ -26,7 +26,8 @@ TIMEZONE = pytz.timezone('Asia/Shanghai')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 
-model = genai.GenerativeModel('gemini-1.5-pro')
+# 【关键修改】使用 API 认可的完整模型名称
+model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
 def send_wxpusher_message(content, summary, uids):
     """通过 WxPusher 发送消息给管理员"""
@@ -55,7 +56,6 @@ def extract_text_from_docx(file_bytes):
                 full_text.append(para.text.strip())
         return '\n'.join(full_text)
     except Exception as e:
-        # 如果上传的不是 Word 文档，这里会静默拦截报错
         print(f"解析文档失败 (可能不是有效的Word文件): {e}")
         return ""
 
@@ -75,23 +75,19 @@ def main():
     file_count = 0
 
     try:
-        # 【关键修改 1】进入 logs 文件夹读取列表
         files = supabase.storage.from_(STORAGE_BUCKET_NAME).list("logs")
         
         for file in files:
             file_name = file.get('name', '')
             
-            # 跳过空文件或隐藏文件
             if not file_name or file_name.startswith('.'):
                 continue
                 
-            # 【关键修改 2】利用 Supabase 记录的创建时间，而不是文件名来判定日期
             created_at_str = file.get('created_at') 
             is_target_date = False
             
             if created_at_str:
                 try:
-                    # 将 Supabase 的 UTC 时间转换为北京时间
                     utc_dt = datetime.strptime(created_at_str[:19], "%Y-%m-%dT%H:%M:%S")
                     utc_dt = pytz.utc.localize(utc_dt)
                     cn_dt = utc_dt.astimezone(TIMEZONE)
@@ -103,14 +99,11 @@ def main():
                     print(f"时间解析失败 {file_name}: {e}")
 
             if is_target_date:
-                # 【关键修改 3】下载时的路径必须补全 logs/ 文件夹路径
                 file_path = f"logs/{file_name}"
                 print(f"成功匹配到文件: {file_path}")
                 
-                # 下载文件
                 response = supabase.storage.from_(STORAGE_BUCKET_NAME).download(file_path)
                 
-                # 提取文本
                 text = extract_text_from_docx(response)
                 if text:
                     all_logs_text += f"\n\n--- 【日志 ID: {file_name[:8]}...】 ---\n{text}"
@@ -131,7 +124,6 @@ def main():
         )
         return
 
-    # 组织 Prompt
     prompt = f"""
 你是一个专业的实验室数据分析助手。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
 作为实验室的管理者，我需要你帮我从繁杂的日志中提炼关键信息。请严格按照以下维度生成一份清晰、专业的 Markdown 简报。
