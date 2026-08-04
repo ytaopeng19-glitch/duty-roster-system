@@ -13,11 +13,13 @@ from supabase import create_client, Client
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# 直接内置您提供的 API Key 和 UID，避免环境变量读取异常
+GEMINI_API_KEY = "AQ.Ab8RN6KK7E_WI6VSYcPUlbloVwN4UX9GbqIsLok_EjNU6hkPMA"
+ADMIN_UID = "UID_U5GlQEGcsb24mLT0M5wupOdDd6L0" 
 
 # 核心配置
 STORAGE_BUCKET_NAME = "work_logs"
-ADMIN_UID = "UID_U5GlQEGcsb24mLT0M5wupOdDd6L0" 
 TIMEZONE = pytz.timezone('Asia/Shanghai')
 
 # ==========================================
@@ -63,7 +65,7 @@ def main():
     # 默认模式：自动获取前一天（昨天）
     target_date = (datetime.now(TIMEZONE) - timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # 想要测试特定日期（如 8月3日），请取消下一行的注释（注意删除行首 # 时，不要破坏对齐的空格！）
+    # 想要测试特定日期（如 8月3日），请取消下一行的注释
     target_date = "2026-08-03" 
     
     print(f"开始执行 {target_date} 的日志分析任务...")
@@ -151,11 +153,8 @@ def main():
 
     print("正在调用 Gemini API 进行深度智能分析...")
     
-    # =======================================================
-    # 🛡️ 绝对稳当：自动轮询与降级策略
-    # =======================================================
-    # 按优先级排列模型。优先用最新的 1.5 系列，如果失败，自动退回到最稳定最基础的 gemini-pro
-    models_to_try = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+    # 覆盖主流现代模型与兼容模型队列，确保平稳运行
+    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
     ai_summary = None
     
     for model_name in models_to_try:
@@ -165,19 +164,15 @@ def main():
             response = model.generate_content(prompt)
             ai_summary = response.text
             print(f"✅ 成功使用 {model_name} 完成分析！")
-            break # 成功调用后立即跳出循环
+            break 
         except Exception as e:
             print(f"⚠️ 模型 {model_name} 报错，尝试下一个... (错误信息: {e})")
 
-    # =======================================================
-    
     if ai_summary:
-        # 发送成功通知
         send_wxpusher_message(ai_summary, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
         print("智能简报已成功推送到您的微信！")
     else:
-        # 所有模型都失败时的终极报错
-        error_msg = "所有可用模型（1.5-pro, 1.5-flash, gemini-pro）均调用失败。请检查 GitHub Secrets 中的 GEMINI_API_KEY 是否正确，或该 Key 的权限是否受限。"
+        error_msg = "所有可用模型均调用失败，请检查 API Key 权限或网络限制。"
         print(error_msg)
         send_wxpusher_message(f"## ❌ AI 分析失败\n\n{error_msg}", "AI 分析接口报错", [ADMIN_UID])
 
