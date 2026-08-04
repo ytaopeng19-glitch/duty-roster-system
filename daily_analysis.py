@@ -66,22 +66,24 @@ def main():
     # =======================================================
     # 🚀 日期控制中心
     # =======================================================
-    # 默认模式：自动获取前一天（昨天）的日志
+    # 在每天早上 7:15 运行时，减去 1 天，完美匹配昨天上传的日志
     target_date = (datetime.now(TIMEZONE) - timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # [调试专用] 如果想测试特定日期，请取消下一行注释并修改日期
+    # [调试专用]
     # target_date = "2026-08-04" 
     
     print(f"开始执行 {target_date} 的日志分析任务...")
 
     all_logs_text = ""
     file_count = 0
+    
+    # 用于存储每位同事的直达下载/查看链接
+    individual_links = []
 
     # =======================================================
-    # 📂 通过数据库查询，下载并解析带有真实身份的日志
+    # 📂 通过数据库查询，解析日志并生成独立外链
     # =======================================================
     try:
-        # 为了防止时区误差，提取前三天的所有数据库记录，再在 Python 层面做精准过滤
         three_days_ago = (datetime.now(TIMEZONE) - timedelta(days=3)).strftime("%Y-%m-%d")
         response = supabase.table("work_logs").select("*").gte("submit_time", three_days_ago).execute()
         logs_data = response.data
@@ -96,13 +98,11 @@ def main():
                     continue
 
                 try:
-                    # 将 Supabase 返回的 UTC 时间转换为北京时间日期
                     utc_dt = datetime.strptime(submit_time_str[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
                     utc_dt = pytz.utc.localize(utc_dt)
                     cn_dt = utc_dt.astimezone(TIMEZONE)
                     file_date = cn_dt.strftime("%Y-%m-%d")
                     
-                    # 匹配目标日期
                     if file_date == target_date:
                         real_file_name = log.get('file_name', '未知文件名')
                         submitter_name = log.get('name', '未知提交人')
@@ -110,12 +110,16 @@ def main():
                         
                         print(f"成功匹配到日志: {submitter_name} - {real_file_name}")
                         
-                        # 下载实际的文件
+                        # 下载实际的文件字节流用于 AI 解析
                         file_bytes = supabase.storage.from_(STORAGE_BUCKET_NAME).download(storage_path)
-                        text = extract_text_from_docx(file_bytes)
                         
+                        # 获取该文件的公共直达链接，并存入列表
+                        file_url = supabase.storage.from_(STORAGE_BUCKET_NAME).get_public_url(storage_path)
+                        individual_links.append(f"- 👤 **{submitter_name}**: [{real_file_name}]({file_url})")
+                        
+                        # 解析文本供 AI 使用
+                        text = extract_text_from_docx(file_bytes)
                         if text:
-                            # 给日志打上真实身份和文件名的标签
                             all_logs_text += f"\n\n========================================\n"
                             all_logs_text += f"【日志提交人】: {submitter_name}\n"
                             all_logs_text += f"【原始文件名】: {real_file_name}\n"
@@ -125,7 +129,7 @@ def main():
                             
                 except Exception as e:
                     print(f"处理日志条目时失败 ({log.get('file_name')}): {e}")
-
+                    
     except Exception as e:
         error_msg = f"访问 Supabase 数据库/存储桶失败或发生异常: {e}"
         print(error_msg)
@@ -142,7 +146,7 @@ def main():
         return
 
     # =======================================================
-    # 🧠 生成 AI 分析 Prompt (穿透监督版)
+    # 🧠 生成 AI 分析 Prompt
     # =======================================================
     prompt = f"""
 你是一个专业的科研团队效能分析与数据审查专家。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
@@ -175,63 +179,51 @@ def main():
 
     print("正在调用 Gemini API 进行深度智能分析...")
     
-    # 显式传递从环境变量获取的真实 API Key
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # =======================================================
-    # 🤖 动态获取当前账号可用的模型列表
-    # =======================================================
     models_to_try = ['gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest']
     try:
-        print("正在查询当前 API Key 可用的模型库...")
         available_models = client.models.list()
         for m in available_models:
             name = m.name.replace("models/", "") if m.name.startswith("models/") else m.name
             if "gemini" in name:
                 models_to_try.append(name)
-        
-        print(f"✅ 成功匹配到可用模型: {models_to_try[:5]}... (仅显示前 5 个)")
-        
     except Exception as e:
-        print(f"⚠️ 动态获取模型列表失败，将启用通用备选列表。错误信息: {e}")
+        print(f"⚠️ 动态获取模型列表失败: {e}")
         models_to_try = ['gemini-2.0-flash', 'gemini-flash', 'gemini-pro']
 
     ai_summary = None
     
-    # =======================================================
-    # 🚀 遍历模型执行分析
-    # =======================================================
     if not models_to_try:
-        error_msg = "未找到任何支持的 Gemini 模型，请检查 Google AI Studio 的账号权限限制。"
-        print(error_msg)
-        send_wxpusher_message(f"## ❌ AI 分析失败\n\n{error_msg}", "无可用模型", [ADMIN_UID])
+        send_wxpusher_message(f"## ❌ AI 分析失败\n\n未找到任何支持的 Gemini 模型", "无可用模型", [ADMIN_UID])
     else:
         for model_name in models_to_try:
             try:
-                print(f"正在尝试使用 {model_name} 模型...")
-                
-                # 调用标准的文本生成接口
+                print(f"尝试使用 {model_name}...")
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt
                 )
                 ai_summary = response.text
-                
-                print(f"✅ 成功使用 {model_name} 完成日志分析！")
-                break  # 成功后立即跳出循环
-                
+                print(f"✅ 成功使用 {model_name} 完成分析！")
+                break
             except Exception as e:
-                print(f"⚠️ 模型 {model_name} 报错，尝试下一个... (错误信息: {e})")
+                print(f"⚠️ {model_name} 报错: {e}")
 
     # =======================================================
-    # 📲 推送最终结果
+    # 📲 推送最终结果（包含独立下载链接清单）
     # =======================================================
     if ai_summary:
-        send_wxpusher_message(ai_summary, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
-        print("智能简报已成功推送到您的微信！")
+        # 将生成的单链接列表拼接成 Markdown 文本
+        links_markdown = "\n".join(individual_links)
+        
+        # 将所有人日志的独立链接拼接到 AI 简报的末尾
+        final_message = f"{ai_summary}\n\n---\n### 🔗 原始日志直达链接\n{links_markdown}"
+        
+        send_wxpusher_message(final_message, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
+        print("智能简报及单文件快捷链接已成功推送到您的微信！")
     else:
         error_msg = "扫描到的所有可用模型均生成失败，请检查 API 调用额度或网络状态。"
-        print(error_msg)
         send_wxpusher_message(f"## ❌ AI 分析失败\n\n{error_msg}", "AI 分析接口报错", [ADMIN_UID])
 
 if __name__ == "__main__":
