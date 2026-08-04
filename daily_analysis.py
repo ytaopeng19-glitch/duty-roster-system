@@ -1,7 +1,7 @@
 import os
 import io
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from docx import Document
 import google.generativeai as genai
@@ -61,22 +61,31 @@ def extract_text_from_docx(file_bytes):
         return ""
 
 def main():
-    today_str = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
-    print(f"开始执行 {today_str} 的日志分析任务...")
+    # =======================================================
+    # 🚀 日期控制中心
+    # =======================================================
+    # 模式一：自动模式（默认）。因为定时任务在凌晨跑，所以默认分析“昨天”
+    target_date = (datetime.now(TIMEZONE) - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    # 模式二：手动指定模式。
+    # 如果您想分析特定的某一天（比如 2026-08-03），请把下面这行的 # 号去掉，并修改日期
+     target_date = "2026-08-03"
+    # =======================================================
+
+    print(f"开始执行 {target_date} 的日志分析任务...")
 
     all_logs_text = ""
     file_count = 0
 
-    # 1. 访问 Supabase 获取今天的日志文件列表
+    # 1. 访问 Supabase 获取目标日期的日志文件列表
     try:
         # 假设文件命名包含日期，或者存放在日期文件夹下。
-        # 此处按获取存储桶下所有文件并过滤出今天的文件名为例
         files = supabase.storage.from_(STORAGE_BUCKET_NAME).list()
         
         for file in files:
             file_name = file['name']
-            # 基础过滤：只处理今天的 .docx 文件
-            if today_str in file_name and file_name.endswith(".docx"):
+            # 过滤：只处理包含目标日期且后缀为 .docx 的文件
+            if target_date in file_name and file_name.endswith(".docx"):
                 print(f"正在下载并解析文件: {file_name}")
                 
                 # 下载文件
@@ -94,19 +103,19 @@ def main():
         send_wxpusher_message(f"## ❌ 日志分析系统异常\n\n{error_msg}", "日志分析系统报错", [ADMIN_UID])
         return
 
-    # 2. 检查今天是否有日志上传
+    # 2. 检查是否有日志上传
     if file_count == 0 or not all_logs_text.strip():
-        print("今日暂无有效日志提取。")
+        print(f"{target_date} 暂无有效日志提取。")
         send_wxpusher_message(
-            f"## 📭 今日实验室日志简报 ({today_str})\n\n今日系统未能在 `{STORAGE_BUCKET_NAME}` 中检测到任何相关日志，或文档内容为空，请核实团队成员提交情况。",
-            "今日无日志提交",
+            f"## 📭 实验室日志简报 ({target_date})\n\n系统未能在 `{STORAGE_BUCKET_NAME}` 中检测到 {target_date} 的任何相关日志，或文档内容为空，请核实团队成员提交情况。",
+            f"无日志提交 ({target_date})",
             [ADMIN_UID]
         )
         return
 
     # 3. 组织 Prompt，交给 Gemini Pro 进行深度分析
     prompt = f"""
-你是一个专业的实验室数据分析助手。以下是今天（{today_str}）团队成员提交的 {file_count} 份工作日志汇总。
+你是一个专业的实验室数据分析助手。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
 作为实验室的管理者，我需要你帮我从繁杂的日志中提炼关键信息。请严格按照以下维度生成一份清晰、专业的 Markdown 简报。
 
 重点关注领域：
@@ -114,10 +123,10 @@ def main():
 2. **细胞房管理**：细胞培养环境状态、污染风险、消耗品使用情况及合规操作记录。
 
 需生成的简报结构：
-## 🔬 实验室综合运行简报 ({today_str})
+## 🔬 实验室综合运行简报 ({target_date})
 
 ### 🟢 核心运行动态
-(简明扼要地总结今天实验室整体的仪器和细胞房运转情况)
+(简明扼要地总结当天实验室整体的仪器和细胞房运转情况)
 
 ### ⚠️ 潜在隐患与异常排查
 (仔细检查日志，是否有任何仪器异常、细胞污染风险、耗材短缺或违规操作。如果没有，请明确回复“未见异常”)
@@ -129,7 +138,7 @@ def main():
 (剔除行政管理、教学等无关事项，仅保留与科研实验、技术服务进展相关的有价值信息)
 
 ---
-以下是今日收集到的原始日志内容：
+以下是收集到的原始日志内容：
 {all_logs_text}
 """
 
@@ -139,7 +148,7 @@ def main():
         ai_summary = response.text
         
         # 4. 将分析结果推送到微信
-        send_wxpusher_message(ai_summary, f"🤖 实验室智能简报 ({today_str})", [ADMIN_UID])
+        send_wxpusher_message(ai_summary, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
         print("智能简报已成功推送到您的微信！")
         
     except Exception as e:
