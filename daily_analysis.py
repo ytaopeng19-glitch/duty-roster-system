@@ -10,7 +10,6 @@ from supabase import create_client, Client
 # ==========================================
 # 1. 配置与环境变量
 # ==========================================
-# 从 GitHub Secrets 获取环境变量
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN")
@@ -27,7 +26,6 @@ TIMEZONE = pytz.timezone('Asia/Shanghai')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 
-# 升级为 Pro 模型，具备更强的专业文本推理和隐患排查能力
 model = genai.GenerativeModel('gemini-1.5-pro')
 
 def send_wxpusher_message(content, summary, uids):
@@ -37,7 +35,7 @@ def send_wxpusher_message(content, summary, uids):
         "appToken": WXPUSHER_APP_TOKEN,
         "content": content,
         "summary": summary,
-        "contentType": 3, # 3 表示支持 Markdown 格式
+        "contentType": 3,
         "uids": uids
     }
     try:
@@ -57,44 +55,65 @@ def extract_text_from_docx(file_bytes):
                 full_text.append(para.text.strip())
         return '\n'.join(full_text)
     except Exception as e:
-        print(f"解析 Word 文档失败: {e}")
+        # 如果上传的不是 Word 文档，这里会静默拦截报错
+        print(f"解析文档失败 (可能不是有效的Word文件): {e}")
         return ""
 
 def main():
     # =======================================================
     # 🚀 日期控制中心
     # =======================================================
-    # 模式一：自动模式（默认）。因为定时任务在凌晨跑，所以默认分析“昨天”
+    # 默认模式：自动获取前一天（昨天）
     target_date = (datetime.now(TIMEZONE) - timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # 模式二：手动指定模式。
-    # 如果您想分析特定的某一天（比如 2026-08-03），请把下面这行的 # 号去掉，并修改日期
-    target_date = "2026-08-03"
-    # =======================================================
-
+    # 想要测试特定日期（如 8月3日），请取消下一行的注释（注意删除行首 # 时，不要破坏对齐的空格！）
+    target_date = "2026-08-03" 
+    
     print(f"开始执行 {target_date} 的日志分析任务...")
 
     all_logs_text = ""
     file_count = 0
 
-    # 1. 访问 Supabase 获取目标日期的日志文件列表
     try:
-        # 假设文件命名包含日期，或者存放在日期文件夹下。
-        files = supabase.storage.from_(STORAGE_BUCKET_NAME).list()
+        # 【关键修改 1】进入 logs 文件夹读取列表
+        files = supabase.storage.from_(STORAGE_BUCKET_NAME).list("logs")
         
         for file in files:
-            file_name = file['name']
-            # 过滤：只处理包含目标日期且后缀为 .docx 的文件
-            if target_date in file_name and file_name.endswith(".docx"):
-                print(f"正在下载并解析文件: {file_name}")
+            file_name = file.get('name', '')
+            
+            # 跳过空文件或隐藏文件
+            if not file_name or file_name.startswith('.'):
+                continue
+                
+            # 【关键修改 2】利用 Supabase 记录的创建时间，而不是文件名来判定日期
+            created_at_str = file.get('created_at') 
+            is_target_date = False
+            
+            if created_at_str:
+                try:
+                    # 将 Supabase 的 UTC 时间转换为北京时间
+                    utc_dt = datetime.strptime(created_at_str[:19], "%Y-%m-%dT%H:%M:%S")
+                    utc_dt = pytz.utc.localize(utc_dt)
+                    cn_dt = utc_dt.astimezone(TIMEZONE)
+                    file_date = cn_dt.strftime("%Y-%m-%d")
+                    
+                    if file_date == target_date:
+                        is_target_date = True
+                except Exception as e:
+                    print(f"时间解析失败 {file_name}: {e}")
+
+            if is_target_date:
+                # 【关键修改 3】下载时的路径必须补全 logs/ 文件夹路径
+                file_path = f"logs/{file_name}"
+                print(f"成功匹配到文件: {file_path}")
                 
                 # 下载文件
-                response = supabase.storage.from_(STORAGE_BUCKET_NAME).download(file_name)
+                response = supabase.storage.from_(STORAGE_BUCKET_NAME).download(file_path)
                 
                 # 提取文本
                 text = extract_text_from_docx(response)
                 if text:
-                    all_logs_text += f"\n\n--- 【日志来源: {file_name}】 ---\n{text}"
+                    all_logs_text += f"\n\n--- 【日志 ID: {file_name[:8]}...】 ---\n{text}"
                     file_count += 1
                     
     except Exception as e:
@@ -103,17 +122,16 @@ def main():
         send_wxpusher_message(f"## ❌ 日志分析系统异常\n\n{error_msg}", "日志分析系统报错", [ADMIN_UID])
         return
 
-    # 2. 检查是否有日志上传
     if file_count == 0 or not all_logs_text.strip():
         print(f"{target_date} 暂无有效日志提取。")
         send_wxpusher_message(
-            f"## 📭 实验室日志简报 ({target_date})\n\n系统未能在 `{STORAGE_BUCKET_NAME}` 中检测到 {target_date} 的任何相关日志，或文档内容为空，请核实团队成员提交情况。",
+            f"## 📭 实验室日志简报 ({target_date})\n\n系统未能在 `{STORAGE_BUCKET_NAME}` 存储桶的 `logs` 文件夹中检测到 {target_date} 的任何有效 Word 日志，请核实团队成员提交情况。",
             f"无日志提交 ({target_date})",
             [ADMIN_UID]
         )
         return
 
-    # 3. 组织 Prompt，交给 Gemini Pro 进行深度分析
+    # 组织 Prompt
     prompt = f"""
 你是一个专业的实验室数据分析助手。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
 作为实验室的管理者，我需要你帮我从繁杂的日志中提炼关键信息。请严格按照以下维度生成一份清晰、专业的 Markdown 简报。
@@ -147,7 +165,6 @@ def main():
         response = model.generate_content(prompt)
         ai_summary = response.text
         
-        # 4. 将分析结果推送到微信
         send_wxpusher_message(ai_summary, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
         print("智能简报已成功推送到您的微信！")
         
