@@ -26,9 +26,6 @@ TIMEZONE = pytz.timezone('Asia/Shanghai')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 
-# 【关键修改】使用 API 认可的完整模型名称
-model = genai.GenerativeModel('gemini-1.5-pro-latest')
-
 def send_wxpusher_message(content, summary, uids):
     """通过 WxPusher 发送消息给管理员"""
     url = "https://wxpusher.zjiecode.com/api/send/message"
@@ -56,7 +53,7 @@ def extract_text_from_docx(file_bytes):
                 full_text.append(para.text.strip())
         return '\n'.join(full_text)
     except Exception as e:
-        print(f"解析文档失败 (可能不是有效的Word文件): {e}")
+        print(f"解析文档失败: {e}")
         return ""
 
 def main():
@@ -152,16 +149,35 @@ def main():
 {all_logs_text}
 """
 
-    print("正在调用 Gemini Pro 进行深度智能分析...")
-    try:
-        response = model.generate_content(prompt)
-        ai_summary = response.text
-        
+    print("正在调用 Gemini API 进行深度智能分析...")
+    
+    # =======================================================
+    # 🛡️ 绝对稳当：自动轮询与降级策略
+    # =======================================================
+    # 按优先级排列模型。优先用最新的 1.5 系列，如果失败，自动退回到最稳定最基础的 gemini-pro
+    models_to_try = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
+    ai_summary = None
+    
+    for model_name in models_to_try:
+        try:
+            print(f"正在尝试使用 {model_name} 模型...")
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            ai_summary = response.text
+            print(f"✅ 成功使用 {model_name} 完成分析！")
+            break # 成功调用后立即跳出循环
+        except Exception as e:
+            print(f"⚠️ 模型 {model_name} 报错，尝试下一个... (错误信息: {e})")
+
+    # =======================================================
+    
+    if ai_summary:
+        # 发送成功通知
         send_wxpusher_message(ai_summary, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
         print("智能简报已成功推送到您的微信！")
-        
-    except Exception as e:
-        error_msg = f"Gemini API 调用失败: {e}"
+    else:
+        # 所有模型都失败时的终极报错
+        error_msg = "所有可用模型（1.5-pro, 1.5-flash, gemini-pro）均调用失败。请检查 GitHub Secrets 中的 GEMINI_API_KEY 是否正确，或该 Key 的权限是否受限。"
         print(error_msg)
         send_wxpusher_message(f"## ❌ AI 分析失败\n\n{error_msg}", "AI 分析接口报错", [ADMIN_UID])
 
