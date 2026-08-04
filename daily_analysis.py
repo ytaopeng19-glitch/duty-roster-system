@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timedelta
 import pytz
 from docx import Document
-from google import genai  # 使用了最新版本的 SDK 导入语法
+from google import genai 
 from supabase import create_client, Client
 
 # ==========================================
@@ -14,8 +14,8 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN")
 
-# 直接内置 API Key 和 UID
-GEMINI_API_KEY = "AQ.Ab8RN6KK7E_WI6VSYcPUlbloVwN4UX9GbqIsLok_EjNU6hkPMA"
+# 从 GitHub Secrets 中读取您的 API Key (AQ. 开头的那个)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 ADMIN_UID = "UID_U5GlQEGcsb24mLT0M5wupOdDd6L0" 
 
 # 核心配置
@@ -23,10 +23,9 @@ STORAGE_BUCKET_NAME = "work_logs"
 TIMEZONE = pytz.timezone('Asia/Shanghai')
 
 # ==========================================
-# 2. 初始化客户端
+# 2. 初始化 Supabase 客户端
 # ==========================================
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-# 注意：Gemini 的 client 初始化移到了 main 函数内部，配合最新的规范
 
 def send_wxpusher_message(content, summary, uids):
     """通过 WxPusher 发送消息给管理员"""
@@ -59,6 +58,12 @@ def extract_text_from_docx(file_bytes):
         return ""
 
 def main():
+    if not GEMINI_API_KEY:
+        print("错误：未找到 GEMINI_API_KEY 环境变量，请检查 GitHub Secrets 配置。")
+        return
+        
+    print(f"🔍 检查点：当前加载的 API Key 前缀为 [{GEMINI_API_KEY[:6]}]")
+
     # =======================================================
     # 🚀 日期控制中心
     # =======================================================
@@ -123,7 +128,6 @@ def main():
         )
         return
 
-    # 针对您的职责进行了优化的 Prompt，强化了对教学和行政事项的过滤
     prompt = f"""
 你是一个专业的实验室数据分析助手。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
 请帮助我从繁杂的日志中提炼关键信息，并严格按照以下维度生成一份清晰、专业的 Markdown 简报。
@@ -157,22 +161,24 @@ def main():
 
     print("正在调用 Gemini API 进行深度智能分析...")
     
-    # 按照最新文档，显式初始化客户端
+    # 显式传递从环境变量获取的真实 API Key
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 覆盖主流现代模型与兼容模型队列，加入了文档中最新的 3.6-flash
-    models_to_try = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+    # 修正了模型名称，并去掉了不存在的 3.6 版本
+    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
     ai_summary = None
     
     for model_name in models_to_try:
         try:
             print(f"正在尝试使用 {model_name} 模型...")
-            # 使用全新的 Interactions API 语法
-            interaction = client.interactions.create(
+            
+            # 👇 核心修复：使用了官方标准的 generate_content 接口，完美支持 API Key
+            response = client.models.generate_content(
                 model=model_name,
-                input=prompt
+                contents=prompt
             )
-            ai_summary = interaction.output_text
+            ai_summary = response.text
+            
             print(f"✅ 成功使用 {model_name} 完成分析！")
             break 
         except Exception as e:
