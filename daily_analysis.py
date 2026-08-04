@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timedelta
 import pytz
 from docx import Document
-import google.generativeai as genai
+from google import genai  # 使用了最新版本的 SDK 导入语法
 from supabase import create_client, Client
 
 # ==========================================
@@ -14,7 +14,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN")
 
-# 直接内置您提供的 API Key 和 UID，避免环境变量读取异常
+# 直接内置 API Key 和 UID
 GEMINI_API_KEY = "AQ.Ab8RN6KK7E_WI6VSYcPUlbloVwN4UX9GbqIsLok_EjNU6hkPMA"
 ADMIN_UID = "UID_U5GlQEGcsb24mLT0M5wupOdDd6L0" 
 
@@ -26,7 +26,7 @@ TIMEZONE = pytz.timezone('Asia/Shanghai')
 # 2. 初始化客户端
 # ==========================================
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-genai.configure(api_key=GEMINI_API_KEY)
+# 注意：Gemini 的 client 初始化移到了 main 函数内部，配合最新的规范
 
 def send_wxpusher_message(content, summary, uids):
     """通过 WxPusher 发送消息给管理员"""
@@ -123,13 +123,17 @@ def main():
         )
         return
 
+    # 针对您的职责进行了优化的 Prompt，强化了对教学和行政事项的过滤
     prompt = f"""
 你是一个专业的实验室数据分析助手。以下是（{target_date}）团队成员提交的 {file_count} 份工作日志汇总。
-作为实验室的管理者，我需要你帮我从繁杂的日志中提炼关键信息。请严格按照以下维度生成一份清晰、专业的 Markdown 简报。
+请帮助我从繁杂的日志中提炼关键信息，并严格按照以下维度生成一份清晰、专业的 Markdown 简报。
 
-重点关注领域：
+【重点关注领域】：
 1. **仪器管理与维护**：所有涉及仪器的运行状态、故障报警、维修进度或保养记录。
 2. **细胞房管理**：细胞培养环境状态、污染风险、消耗品使用情况及合规操作记录。
+
+【严格过滤规则】：
+请在简报中彻底剔除任何关于教学任务、行政领导管理或团队建设凝聚力等不相关的内容，仅保留纯粹的技术服务、实验进展和硬件管理信息。
 
 需生成的简报结构：
 ## 🔬 实验室综合运行简报 ({target_date})
@@ -143,8 +147,8 @@ def main():
 ### 🛠️ 仪器维护追踪
 (列出提到的具体仪器名称及其状态，方便后续跟进)
 
-### 📊 其他值得注意的事项
-(剔除行政管理、教学等无关事项，仅保留与科研实验、技术服务进展相关的有价值信息)
+### 📊 其他技术注意事项
+(仅保留与科研实验、技术服务进展相关的有价值信息，剔除行政与教学内容)
 
 ---
 以下是收集到的原始日志内容：
@@ -153,16 +157,22 @@ def main():
 
     print("正在调用 Gemini API 进行深度智能分析...")
     
-    # 覆盖主流现代模型与兼容模型队列，确保平稳运行
-    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+    # 按照最新文档，显式初始化客户端
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    # 覆盖主流现代模型与兼容模型队列，加入了文档中最新的 3.6-flash
+    models_to_try = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
     ai_summary = None
     
     for model_name in models_to_try:
         try:
             print(f"正在尝试使用 {model_name} 模型...")
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            ai_summary = response.text
+            # 使用全新的 Interactions API 语法
+            interaction = client.interactions.create(
+                model=model_name,
+                input=prompt
+            )
+            ai_summary = interaction.output_text
             print(f"✅ 成功使用 {model_name} 完成分析！")
             break 
         except Exception as e:
