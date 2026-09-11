@@ -15,7 +15,11 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-ADMIN_UID = "UID_U5GlQEGcsb24mLT0M5wupOdDd6L0" 
+# 【修改点】将原来的单个 ADMIN_UID 变成了包含两个 UID 的列表 ADMIN_UIDS
+ADMIN_UIDS = [
+    "UID_U5GlQEGcsb24mLT0M5wupOdDd6L0", 
+    "UID_oOEfN5KNrbssY3INfSrtCJyNbJA1"
+] 
 
 # 核心配置
 STORAGE_BUCKET_NAME = "work_logs"
@@ -133,15 +137,17 @@ def main():
     except Exception as e:
         error_msg = f"访问 Supabase 数据库/存储桶失败或发生异常: {e}"
         print(error_msg)
-        send_wxpusher_message(f"## ❌ 日志分析系统异常\n\n{error_msg}", "日志分析系统报错", [ADMIN_UID])
+        # 【修改点】[ADMIN_UID] 替换为 ADMIN_UIDS
+        send_wxpusher_message(f"## ❌ 日志分析系统异常\n\n{error_msg}", "日志分析系统报错", ADMIN_UIDS)
         return
 
     if file_count == 0 or not all_logs_text.strip():
         print(f"{target_date} 暂无有效日志提取。")
+        # 【修改点】[ADMIN_UID] 替换为 ADMIN_UIDS
         send_wxpusher_message(
             f"## 📭 实验室日志简报 ({target_date})\n\n系统未能在数据库中检测到 {target_date} 的任何有效 Word 日志，请核实团队成员提交情况。",
             f"无日志提交 ({target_date})",
-            [ADMIN_UID]
+            ADMIN_UIDS
         )
         return
 
@@ -195,7 +201,8 @@ def main():
     ai_summary = None
     
     if not models_to_try:
-        send_wxpusher_message(f"## ❌ AI 分析失败\n\n未找到任何支持的 Gemini 模型", "无可用模型", [ADMIN_UID])
+        # 【修改点】[ADMIN_UID] 替换为 ADMIN_UIDS
+        send_wxpusher_message(f"## ❌ AI 分析失败\n\n未找到任何支持的 Gemini 模型", "无可用模型", ADMIN_UIDS)
     else:
         for model_name in models_to_try:
             try:
@@ -220,11 +227,13 @@ def main():
         # 将所有人日志的独立链接拼接到 AI 简报的末尾
         final_message = f"{ai_summary}\n\n---\n### 🔗 原始日志直达链接\n{links_markdown}"
         
-        send_wxpusher_message(final_message, f"🤖 实验室智能简报 ({target_date})", [ADMIN_UID])
+        # 【修改点】[ADMIN_UID] 替换为 ADMIN_UIDS
+        send_wxpusher_message(final_message, f"🤖 实验室智能简报 ({target_date})", ADMIN_UIDS)
         print("智能简报及单文件快捷链接已成功推送到您的微信！")
     else:
         error_msg = "扫描到的所有可用模型均生成失败，请检查 API 调用额度或网络状态。"
-        send_wxpusher_message(f"## ❌ AI 分析失败\n\n{error_msg}", "AI 分析接口报错", [ADMIN_UID])
+        # 【修改点】[ADMIN_UID] 替换为 ADMIN_UIDS
+        send_wxpusher_message(f"## ❌ AI 分析失败\n\n{error_msg}", "AI 分析接口报错", ADMIN_UIDS)
 
 if __name__ == "__main__":
     main()
