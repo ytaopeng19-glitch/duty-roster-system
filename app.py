@@ -273,10 +273,12 @@ with tab2:
 if is_admin:
     with tab3:
         st.subheader("🛡️ 系统管理后台")
-        st.caption("作为管理员，您拥有查看全局数据和强制干预删除的权限。")
+        st.caption(f"尊贵的管理员 {my_name}，您拥有查看全局数据和强制干预删除的最高权限。")
         
-        admin_sub_tab1, admin_sub_tab2 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅"])
+        # 增加了一个新的子标签页 "📅 日志提交核查"
+        admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅", "📅 日志提交核查"])
         
+        # --- 子标签页 1：全体排班 ---
         with admin_sub_tab1:
             if not df_records.empty:
                 display_df = df_records.rename(columns={
@@ -309,6 +311,7 @@ if is_admin:
             else:
                 st.info("📂 当前无任何排班记录。")
                 
+        # --- 子标签页 2：日志调阅 ---
         with admin_sub_tab2:
             st.write("📊 **公司全体人员日志云端库：**")
             
@@ -351,3 +354,59 @@ if is_admin:
                     st.info("📂 暂无符合条件的工作日志上传记录。")
             except Exception as e:
                 st.warning(f"⚠️ 无法读取工作日志数据：{e}")
+                
+        # --- 子标签页 3：日志提交核查 (彭总专属) ---
+        with admin_sub_tab3:
+            st.write("📊 **按日期区间核查员工日志提交情况：**")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                # 默认查看昨天到今天
+                check_start = st.date_input("选择开始日期", value=date.today() - timedelta(days=1))
+            with col2:
+                check_end = st.date_input("选择结束日期", value=date.today())
+                
+            if st.button("🔍 开始核实", type="primary", use_container_width=True):
+                if check_start > check_end:
+                    st.error("❌ 开始日期不能晚于结束日期！")
+                else:
+                    try:
+                        # 转换时间范围（覆盖所选日期的 00:00:00 到 23:59:59，并带上东八区时区）
+                        start_time_str = f"{check_start} 00:00:00+08:00"
+                        end_time_str = f"{check_end} 23:59:59+08:00"
+                        
+                        # 请求数据库，查找期间内的日志
+                        response = supabase.table('work_logs').select('name').gte('submit_time', start_time_str).lte('submit_time', end_time_str).execute()
+                        submitted_data = response.data
+                        
+                        # 提取已交人员名单（通过 set 去重，防止一人交多份）
+                        submitted_names = set([record.get('name') for record in submitted_data if record.get('name')])
+                        
+                        # 获取全体员工名单
+                        all_employees = set(EMPLOYEES.values())
+                        
+                        # 计算未交名单（全体人员 减去 已交人员）
+                        missing_users = all_employees - submitted_names
+                        
+                        st.divider()
+                        st.subheader(f"核查结果：{check_start} 至 {check_end}")
+                        
+                        col_res1, col_res2 = st.columns(2)
+                        with col_res1:
+                            st.success(f"✅ **已交名单 ({len(submitted_names)} 人)**")
+                            if submitted_names:
+                                for name in submitted_names:
+                                    st.write(f"🔹 {name}")
+                            else:
+                                st.write("期间内无人提交。")
+                                
+                        with col_res2:
+                            if len(missing_users) > 0:
+                                st.error(f"❌ **未交名单 ({len(missing_users)} 人)**")
+                                for name in missing_users:
+                                    st.write(f"🔸 {name}")
+                            else:
+                                st.success("🎉 太棒了，全员皆已提交！")
+                                
+                    except Exception as e:
+                        st.error(f"🚨 数据库查询失败: {e}")
