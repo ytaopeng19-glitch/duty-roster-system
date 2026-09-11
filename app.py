@@ -5,7 +5,7 @@ from datetime import date, timedelta, datetime, timezone
 import uuid
 
 # --- 1. 页面基本配置 ---
-st.set_page_config(page_title="中佳研发办公与值班管理系统", page_icon="🏢", layout="centered")
+st.set_page_config(page_title="中佳研发办公与值班管理系统", page_icon="🏢", layout="wide") # 调整为 wide 宽屏模式，方便看大表格
 
 # --- 2. 员工基础数据与权限配置 ---
 EMPLOYEES = {
@@ -14,6 +14,8 @@ EMPLOYEES = {
     "25002": "施明鸿", "26003": "李春维", "26004": "卢镇",
     "12002": "刘佳",   "12001": "曲寿康", "24000": "彭宇涛"
 }
+
+# 最高管理员名单
 ADMIN_NAMES = ["刘佳", "曲寿康", "彭宇涛"]
 
 # 设置北京时间时区用于时间解析转换
@@ -43,54 +45,55 @@ if "user" not in st.session_state:
 
 # 如果未登录，只显示登录界面并拦截后续渲染
 if st.session_state.user is None:
-    st.title("🏢 中佳研发协同管理系统")
-    st.subheader("🔐 员工身份认证")
-    
-    with st.container(border=True):
-        # 优化下拉菜单：将编号与姓名拼接展示
-        display_options = [""] + [f"{k} - {v}" for k, v in EMPLOYEES.items()]
-        selected_option = st.selectbox("请选择您的员工账号", options=display_options)
+    # 登录界面的容器保持居中即可，不受全局 wide 影响
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🏢 中佳研发协同管理系统")
+        st.subheader("🔐 员工身份认证")
         
-        if selected_option:
-            # 从 "26001 - 郑家颖" 中提取实际的编号 "26001"
-            login_emp_id = selected_option.split(" - ")[0]
-            emp_name = EMPLOYEES[login_emp_id]
-            st.info(f"👤 匹配姓名：**{emp_name}**")
+        with st.container(border=True):
+            display_options = [""] + [f"{k} - {v}" for k, v in EMPLOYEES.items()]
+            selected_option = st.selectbox("请选择您的员工账号", options=display_options)
             
-            login_pwd = st.text_input("请输入 6 位数字密码", type="password", max_chars=6)
-            st.caption("ℹ️ **提示**：首次登录时，您输入的 6 位数字将自动绑定为您账号的永久密码。")
-            
-            if st.button("🚀 登录 / 激活账号", use_container_width=True):
-                if len(login_pwd) != 6 or not login_pwd.isdigit():
-                    st.error("❌ 密码格式错误：必须是 6 位纯数字！")
-                else:
-                    try:
-                        res = supabase.table("users").select("*").eq("emp_id", login_emp_id).execute()
-                        if res.data:
-                            if res.data[0]["password"] == login_pwd:
+            if selected_option:
+                login_emp_id = selected_option.split(" - ")[0]
+                emp_name = EMPLOYEES[login_emp_id]
+                st.info(f"👤 匹配姓名：**{emp_name}**")
+                
+                login_pwd = st.text_input("请输入 6 位数字密码", type="password", max_chars=6)
+                st.caption("ℹ️ **提示**：首次登录时，您输入的 6 位数字将自动绑定为您账号的永久密码。")
+                
+                if st.button("🚀 登录 / 激活账号", use_container_width=True):
+                    if len(login_pwd) != 6 or not login_pwd.isdigit():
+                        st.error("❌ 密码格式错误：必须是 6 位纯数字！")
+                    else:
+                        try:
+                            res = supabase.table("users").select("*").eq("emp_id", login_emp_id).execute()
+                            if res.data:
+                                if res.data[0]["password"] == login_pwd:
+                                    st.session_state.user = {
+                                        "emp_id": login_emp_id, 
+                                        "name": emp_name, 
+                                        "is_admin": emp_name in ADMIN_NAMES
+                                    }
+                                    st.rerun()
+                                else:
+                                    st.error("❌ 密码错误，请重新输入！")
+                            else:
+                                supabase.table("users").insert({
+                                    "emp_id": login_emp_id, 
+                                    "name": emp_name, 
+                                    "password": login_pwd
+                                }).execute()
                                 st.session_state.user = {
                                     "emp_id": login_emp_id, 
                                     "name": emp_name, 
                                     "is_admin": emp_name in ADMIN_NAMES
                                 }
+                                st.success(f"✅ 密码设置成功！欢迎您，{emp_name}。")
                                 st.rerun()
-                            else:
-                                st.error("❌ 密码错误，请重新输入！")
-                        else:
-                            supabase.table("users").insert({
-                                "emp_id": login_emp_id, 
-                                "name": emp_name, 
-                                "password": login_pwd
-                            }).execute()
-                            st.session_state.user = {
-                                "emp_id": login_emp_id, 
-                                "name": emp_name, 
-                                "is_admin": emp_name in ADMIN_NAMES
-                            }
-                            st.success(f"✅ 密码设置成功！欢迎您，{emp_name}。")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 数据库连接异常：{e}")
+                        except Exception as e:
+                            st.error(f"❌ 数据库连接异常：{e}")
     st.stop() 
 
 # ================= 下方为登录成功后的主界面 =================
@@ -99,7 +102,7 @@ current_user = st.session_state.user
 is_admin = current_user["is_admin"]
 my_name = current_user["name"]
 
-col_title, col_logout = st.columns([4, 1])
+col_title, col_logout = st.columns([10, 1])
 with col_title:
     st.title("🏢 中佳研发协同管理系统")
 with col_logout:
@@ -174,7 +177,6 @@ with tab1:
         st.success(f"✅ 该日期已有 {current_selected_count} 人报名，欢迎加入团队作战！", icon="🤝")
         
     if st.button("🚀 确认以我的名义提交登记"):
-        # 新增：检查该员工是否在当天已经提交过登记
         is_duplicate = False
         if not df_records.empty:
             match = df_records[(df_records['name'] == my_name) & (df_records['target_date'] == selected_date_val)]
@@ -197,7 +199,6 @@ with tab2:
     st.subheader("📁 个人工作日志中心")
     st.markdown("💡 **规定说明：** 您仅能查看和下载过去 **1 个星期内** 提交的日志。若当天上传的文件有误，您可以使用右侧的“撤回”按钮删除重传。")
     
-    # 文件上传区域
     uploaded_doc = st.file_uploader(
         "上传新的工作日志 (仅支持 .docx 格式，大小限制 5MB 以内)", 
         type=["docx"], 
@@ -236,7 +237,6 @@ with tab2:
     st.subheader("📜 您近期的日志列表")
     
     try:
-        # 获取 7 天前的日期字符串，过滤 Supabase 数据
         seven_days_ago = str(date.today() - timedelta(days=7))
         my_logs_res = supabase.table("work_logs").select("*").eq("name", my_name).gte("submit_time", seven_days_ago).order("submit_time", desc=True).execute()
         my_logs = my_logs_res.data
@@ -253,7 +253,6 @@ with tab2:
                     except:
                         st.write("链接生成失败")
                 with col_del:
-                    # 如果这篇日志是“今天”上传的，则允许员工删除撤回
                     if get_local_date(log['submit_time']) == date.today():
                         if st.button("🗑️ 撤回", key=f"del_user_{log['id']}"):
                             try:
@@ -275,8 +274,7 @@ if is_admin:
         st.subheader("🛡️ 系统管理后台")
         st.caption(f"尊贵的管理员 {my_name}，您拥有查看全局数据和强制干预删除的最高权限。")
         
-        # 增加了一个新的子标签页 "📅 日志提交核查"
-        admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅", "📅 日志提交核查"])
+        admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅", "📅 每日日志考勤矩阵"])
         
         # --- 子标签页 1：全体排班 ---
         with admin_sub_tab1:
@@ -340,7 +338,6 @@ if is_admin:
                             except:
                                 st.write("获取链接失败")
                         with col_del:
-                            # 管理员拥有所有日志的强制删除权限
                             if st.button("危 强制删除", key=f"del_admin_{log['id']}"):
                                 try:
                                     supabase.storage.from_("work_logs").remove([log['file_path']])
@@ -355,58 +352,95 @@ if is_admin:
             except Exception as e:
                 st.warning(f"⚠️ 无法读取工作日志数据：{e}")
                 
-        # --- 子标签页 3：日志提交核查 (彭总专属) ---
+        # --- 子标签页 3：全新版考勤矩阵 ---
         with admin_sub_tab3:
-            st.write("📊 **按日期区间核查员工日志提交情况：**")
+            st.write("📊 **自动拉取时间段内每个人的提交情况，红十字标红工作日缺交人员：**")
             
             col1, col2 = st.columns(2)
             with col1:
-                # 默认查看昨天到今天
-                check_start = st.date_input("选择开始日期", value=date.today() - timedelta(days=1))
+                # 默认查看过去7天
+                check_start = st.date_input("选择起始日期", value=date.today() - timedelta(days=7))
             with col2:
                 check_end = st.date_input("选择结束日期", value=date.today())
                 
-            if st.button("🔍 开始核实", type="primary", use_container_width=True):
+            if st.button("🔍 生成考勤分析矩阵", type="primary", use_container_width=True):
                 if check_start > check_end:
                     st.error("❌ 开始日期不能晚于结束日期！")
                 else:
-                    try:
-                        # 转换时间范围（覆盖所选日期的 00:00:00 到 23:59:59，并带上东八区时区）
-                        start_time_str = f"{check_start} 00:00:00+08:00"
-                        end_time_str = f"{check_end} 23:59:59+08:00"
-                        
-                        # 请求数据库，查找期间内的日志
-                        response = supabase.table('work_logs').select('name').gte('submit_time', start_time_str).lte('submit_time', end_time_str).execute()
-                        submitted_data = response.data
-                        
-                        # 提取已交人员名单（通过 set 去重，防止一人交多份）
-                        submitted_names = set([record.get('name') for record in submitted_data if record.get('name')])
-                        
-                        # 获取全体员工名单
-                        all_employees = set(EMPLOYEES.values())
-                        
-                        # 计算未交名单（全体人员 减去 已交人员）
-                        missing_users = all_employees - submitted_names
-                        
-                        st.divider()
-                        st.subheader(f"核查结果：{check_start} 至 {check_end}")
-                        
-                        col_res1, col_res2 = st.columns(2)
-                        with col_res1:
-                            st.success(f"✅ **已交名单 ({len(submitted_names)} 人)**")
-                            if submitted_names:
-                                for name in submitted_names:
-                                    st.write(f"🔹 {name}")
-                            else:
-                                st.write("期间内无人提交。")
+                    with st.spinner("正在分析全体人员打卡数据..."):
+                        try:
+                            # 1. 查出指定时间段所有日志
+                            start_time_str = f"{check_start} 00:00:00+08:00"
+                            end_time_str = f"{check_end} 23:59:59+08:00"
+                            response = supabase.table('work_logs').select('name, submit_time').gte('submit_time', start_time_str).lte('submit_time', end_time_str).execute()
+                            logs_data = response.data
+                            
+                            # 2. 将日志归档到每个人名下的具体日期集合中 (Set)
+                            emp_submissions = {name: set() for name in EMPLOYEES.values()}
+                            if logs_data:
+                                for log in logs_data:
+                                    emp_name = log.get('name')
+                                    submit_time = log.get('submit_time')
+                                    if emp_name in emp_submissions and submit_time:
+                                        log_date = get_local_date(submit_time)
+                                        if log_date:
+                                            emp_submissions[emp_name].add(log_date)
+                            
+                            # 3. 生成日期列表和矩阵数据
+                            delta = check_end - check_start
+                            date_list = [check_start + timedelta(days=i) for i in range(delta.days + 1)]
+                            
+                            matrix_data = []
+                            for emp in EMPLOYEES.values():
+                                row = {"员工姓名": emp}
+                                missed_workdays = 0
                                 
-                        with col_res2:
-                            if len(missing_users) > 0:
-                                st.error(f"❌ **未交名单 ({len(missing_users)} 人)**")
-                                for name in missing_users:
-                                    st.write(f"🔸 {name}")
-                            else:
-                                st.success("🎉 太棒了，全员皆已提交！")
+                                for d in date_list:
+                                    # 获取周几，0-4为周一到周五，5-6为周末
+                                    is_workday = d.weekday() < 5 
+                                    has_submitted = d in emp_submissions[emp]
+                                    date_str = d.strftime("%m-%d")
+                                    
+                                    if has_submitted:
+                                        row[date_str] = "✅ 已交"
+                                    else:
+                                        if is_workday:
+                                            row[date_str] = "❌ 缺交"
+                                            missed_workdays += 1
+                                        else:
+                                            row[date_str] = "➖ 周末"
                                 
-                    except Exception as e:
-                        st.error(f"🚨 数据库查询失败: {e}")
+                                row["🔴 工作日缺交汇总"] = missed_workdays
+                                matrix_data.append(row)
+                                
+                            # 4. 转化为 DataFrame 并按缺勤次数降序排序（抓典型）
+                            df_matrix = pd.DataFrame(matrix_data)
+                            df_matrix = df_matrix.sort_values(by="🔴 工作日缺交汇总", ascending=False)
+                            
+                            # 5. 高级单元格样式渲染
+                            def highlight_matrix(val):
+                                if val == "❌ 缺交":
+                                    return 'color: #D32F2F; font-weight: bold; background-color: #ffebee;'
+                                elif val == "✅ 已交":
+                                    return 'color: #388E3C;'
+                                elif val == "➖ 周末":
+                                    return 'color: #9E9E9E;'
+                                elif isinstance(val, int):
+                                    if val > 0:
+                                        return 'color: #D32F2F; font-weight: bold;'
+                                    else:
+                                        return 'color: #388E3C; font-weight: bold;'
+                                return ''
+                            
+                            st.divider()
+                            st.subheader(f"📅 考勤矩阵：{check_start} 至 {check_end}")
+                            st.caption("注：按『工作日缺交汇总』次数由高到低排序。周末不强制提交，计为灰底。")
+                            
+                            st.dataframe(
+                                df_matrix.style.map(highlight_matrix),
+                                use_container_width=True, 
+                                hide_index=True
+                            )
+                            
+                        except Exception as e:
+                            st.error(f"🚨 考勤数据分析失败: {e}")
