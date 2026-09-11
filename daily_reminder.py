@@ -82,6 +82,9 @@ print(f"🧐 未交名单 ({len(missing_users)}人): {missing_users}")
 # ==========================================
 ADMIN_NAMES = ["彭玉桃", "彭宇涛"]
 
+# 【新增配置】不需要参与考核，但需要接收后台汇总数据的额外管理员 UID 列表
+EXTRA_ADMIN_UIDS = ["UID_oOEfN5KNrbssY3INfSrtCJyNbJA1"]
+
 def get_valid_uids(name_list):
     """辅助函数：获取指定名单中有效的 WxPusher UIDs"""
     uids = []
@@ -142,8 +145,11 @@ if missing_users:
             except Exception as e:
                 print(f"🚨 [私人微信-普通同事] 推送异常: {e}")
                 
-        # B. 给管理员 (彭宇涛) 发送总体汇总名单
+        # B. 给管理员 (彭宇涛及额外管理员) 发送总体汇总名单
         admin_uids = get_valid_uids(ADMIN_NAMES)
+        admin_uids.extend(EXTRA_ADMIN_UIDS) # 【代码修改点】拼加新 UID
+        admin_uids = list(set(admin_uids)) # 去重防发两次
+        
         if admin_uids:
             try:
                 res = requests.post("https://wxpusher.zjiecode.com/api/send/message", json={
@@ -164,6 +170,9 @@ else:
     # 彩蛋：如果所有人都交了，也给管理员发送一条确认消息
     if WXPUSHER_APP_TOKEN:
         admin_uids = get_valid_uids(["彭宇涛"])
+        admin_uids.extend(EXTRA_ADMIN_UIDS) # 【代码修改点】全员交齐的通知也发给新 UID
+        admin_uids = list(set(admin_uids))
+        
         if admin_uids:
             success_content = f"## 🎉 日志提交完毕\n\n**针对日期：** {target_date}\n\n太棒了！所有同事均已完成本日的工作日志提交，各项管理记录完备。无需进行未交提醒。"
             try:
