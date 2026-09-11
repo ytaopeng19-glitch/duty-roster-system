@@ -5,7 +5,7 @@ from datetime import date, timedelta, datetime, timezone
 import uuid
 
 # --- 1. 页面基本配置 ---
-st.set_page_config(page_title="中佳研发办公与值班管理系统", page_icon="🏢", layout="wide") # 调整为 wide 宽屏模式，方便看大表格
+st.set_page_config(page_title="中佳研发办公与值班管理系统", page_icon="🏢", layout="wide")
 
 # --- 2. 员工基础数据与权限配置 ---
 EMPLOYEES = {
@@ -14,8 +14,6 @@ EMPLOYEES = {
     "25002": "施明鸿", "26003": "李春维", "26004": "卢镇",
     "12002": "刘佳",   "12001": "曲寿康", "24000": "彭宇涛"
 }
-
-# 最高管理员名单
 ADMIN_NAMES = ["刘佳", "曲寿康", "彭宇涛"]
 
 # 设置北京时间时区用于时间解析转换
@@ -45,7 +43,6 @@ if "user" not in st.session_state:
 
 # 如果未登录，只显示登录界面并拦截后续渲染
 if st.session_state.user is None:
-    # 登录界面的容器保持居中即可，不受全局 wide 影响
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.title("🏢 中佳研发协同管理系统")
@@ -272,7 +269,7 @@ with tab2:
 if is_admin:
     with tab3:
         st.subheader("🛡️ 系统管理后台")
-        st.caption(f"尊贵的管理员 {my_name}，您拥有查看全局数据和强制干预删除的最高权限。")
+        st.caption("作为管理员，您拥有查看全局数据和强制干预删除的权限。")
         
         admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs(["📊 全体人员排班", "📁 全体员工日志调阅", "📅 每日日志考勤矩阵"])
         
@@ -309,14 +306,26 @@ if is_admin:
             else:
                 st.info("📂 当前无任何排班记录。")
                 
-        # --- 子标签页 2：日志调阅 ---
+        # --- 子标签页 2：日志调阅 (包含批量空间管理) ---
         with admin_sub_tab2:
             st.write("📊 **公司全体人员日志云端库：**")
             
             all_emp_names = list(EMPLOYEES.values())
             filter_emp = st.selectbox("请选择要调阅的员工日志", options=["查看所有人"] + all_emp_names)
             
+            # 还原您截图中新增的“批量空间管理”模块
             st.divider()
+            st.subheader("🛠️ 批量空间管理")
+            col_batch1, col_batch2 = st.columns(2)
+            with col_batch1:
+                if st.button("📦 1. 预备打包当前列表中的日志", use_container_width=True):
+                    st.info("💡 提示：请将您本地的批量打包下载逻辑整合至此处。")
+            with col_batch2:
+                if st.button("🚨 一键清空当前列表所有日志 (危险操作)", use_container_width=True):
+                    st.warning("💡 提示：请将您本地的批量清空代码整合至此处。")
+            
+            st.divider()
+            st.subheader("📄 日志明细列表")
             
             try:
                 if filter_emp == "查看所有人":
@@ -358,7 +367,6 @@ if is_admin:
             
             col1, col2 = st.columns(2)
             with col1:
-                # 默认查看过去7天
                 check_start = st.date_input("选择起始日期", value=date.today() - timedelta(days=7))
             with col2:
                 check_end = st.date_input("选择结束日期", value=date.today())
@@ -369,13 +377,11 @@ if is_admin:
                 else:
                     with st.spinner("正在分析全体人员打卡数据..."):
                         try:
-                            # 1. 查出指定时间段所有日志
                             start_time_str = f"{check_start} 00:00:00+08:00"
                             end_time_str = f"{check_end} 23:59:59+08:00"
                             response = supabase.table('work_logs').select('name, submit_time').gte('submit_time', start_time_str).lte('submit_time', end_time_str).execute()
                             logs_data = response.data
                             
-                            # 2. 将日志归档到每个人名下的具体日期集合中 (Set)
                             emp_submissions = {name: set() for name in EMPLOYEES.values()}
                             if logs_data:
                                 for log in logs_data:
@@ -386,7 +392,6 @@ if is_admin:
                                         if log_date:
                                             emp_submissions[emp_name].add(log_date)
                             
-                            # 3. 生成日期列表和矩阵数据
                             delta = check_end - check_start
                             date_list = [check_start + timedelta(days=i) for i in range(delta.days + 1)]
                             
@@ -396,7 +401,6 @@ if is_admin:
                                 missed_workdays = 0
                                 
                                 for d in date_list:
-                                    # 获取周几，0-4为周一到周五，5-6为周末
                                     is_workday = d.weekday() < 5 
                                     has_submitted = d in emp_submissions[emp]
                                     date_str = d.strftime("%m-%d")
@@ -413,11 +417,9 @@ if is_admin:
                                 row["🔴 工作日缺交汇总"] = missed_workdays
                                 matrix_data.append(row)
                                 
-                            # 4. 转化为 DataFrame 并按缺勤次数降序排序（抓典型）
                             df_matrix = pd.DataFrame(matrix_data)
                             df_matrix = df_matrix.sort_values(by="🔴 工作日缺交汇总", ascending=False)
                             
-                            # 5. 高级单元格样式渲染
                             def highlight_matrix(val):
                                 if val == "❌ 缺交":
                                     return 'color: #D32F2F; font-weight: bold; background-color: #ffebee;'
